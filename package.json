@@ -1,0 +1,23 @@
+{
+  "name": "fever-mj-server",
+  "version": "0.1.0",
+  "description": "オリジナル3人麻雀「FEVER MJ」オンライン対戦サーバー",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5",
+    "uuid": "^9.0.1"
+  },
+  "optionalDependencies": {
+    "better-sqlite3": "^11.3.0"
+  },
+  "private": true
+}

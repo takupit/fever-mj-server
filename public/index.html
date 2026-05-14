@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FEVER MJ - ロビー</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; min-height: 100vh;
+    background: radial-gradient(ellipse at center, #1a0033 0%, #000 100%);
+    color: white;
+    font-family: 'Reggae One', 'Yu Gothic', sans-serif;
+    text-align: center;
+  }
+  .wrap {
+    max-width: 420px;
+    margin: 0 auto;
+    padding: 40px 20px;
+  }
+  h1 {
+    font-size: 36px;
+    background: linear-gradient(45deg, #ff2d55, #ffd700, #ff00aa);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    margin-bottom: 4px;
+  }
+  .sub { color: rgba(255,255,255,0.5); font-size: 13px; margin-bottom: 32px; }
+  .panel {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,215,0,0.3);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 16px;
+  }
+  .status {
+    color: #00e5ff;
+    font-size: 16px;
+    margin-bottom: 8px;
+  }
+  .status.error { color: #ff2d55; }
+  .hint { font-size: 12px; color: rgba(255,255,255,0.5); }
+  .link {
+    display: inline-block;
+    margin-top: 14px;
+    color: #ffd700;
+    text-decoration: none;
+    border-bottom: 1px dashed #ffd700;
+    font-size: 14px;
+  }
+  .phase-note {
+    font-size: 11px;
+    color: rgba(255,255,255,0.4);
+    margin-top: 24px;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🀄 FEVER MJ</h1>
+  <div class="sub">オリジナル3人麻雀（オンライン対戦版）</div>
+
+  <div class="panel">
+    <div id="connStatus" class="status">接続確認中...</div>
+    <div class="hint">サーバーとの WebSocket 接続テスト</div>
+  </div>
+
+  <div class="panel">
+    <div style="font-size:14px; color: rgba(255,255,255,0.7); margin-bottom: 8px;">
+      ロビー機能は<br><strong style="color:#ffd700;">フェーズ3</strong>で実装予定です
+    </div>
+    <a class="link" href="/play.html">→ 既存の対局画面（CPU対戦版）</a>
+  </div>
+
+  <div class="phase-note">
+    フェーズ1（MVP）: サーバー骨格のみ動作中<br>
+    次のフェーズ: ゲームロジックの分離移植
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/js/socket-client.js"></script>
+</body>
+</html>

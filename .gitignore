@@ -1,0 +1,29 @@
+# Node.js が使うフォルダ・ファイル
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 環境変数（秘密の設定値を含むので Git に乗せない）
+.env
+.env.local
+.env.*.local
+
+# OS が勝手に作るファイル
+.DS_Store
+Thumbs.db
+
+# エディタ設定
+.vscode/
+.idea/
+*.swp
+
+# SQLite データベース本体（戦績データ）
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# ログ
+logs/
+*.log
