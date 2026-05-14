@@ -1,10 +1,11 @@
 // ============================================================
 // FEVER MJ オンライン対戦サーバー
-// フェーズ1: 最小起動コード（Express + Socket.IO の骨格のみ）
+// フェーズ3: ロビー＋3人マッチング機能
 // ============================================================
 // このファイルがサーバーの入口です。
-//   ・Express: ブラウザに HTML/JS/CSS を配信する Web サーバー
+//   ・Express:   ブラウザに HTML/JS/CSS を配信する Web サーバー
 //   ・Socket.IO: ブラウザとサーバーがリアルタイムで通信する仕組み
+//   ・RoomManager: 合言葉部屋の作成・参加・退室管理（src/room/manager.js）
 // ============================================================
 
 // .env ファイルから環境変数を読み込む
@@ -14,6 +15,9 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const { Server } = require('socket.io');
+
+const { RoomManager } = require('./src/room/manager');
+const { registerHandlers } = require('./src/socket/handlers');
 
 // Express アプリと、その上に被せる HTTP サーバーを作成
 const app = express();
@@ -34,24 +38,38 @@ const io = new Server(server, {
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ------------------------------------------------------------
-// ヘルスチェック用エンドポイント
-// 本番（Render など）でスリープ防止のために定期的に叩かれる
+// ヘルスチェック用エンドポイント（Render など本番のスリープ防止）
 // ------------------------------------------------------------
 app.get('/healthz', (req, res) => {
-  res.json({ status: 'ok', uptime: process.uptime() });
+  res.json({
+    status: 'ok',
+    uptime: process.uptime(),
+    rooms: roomManager.roomCount(),
+  });
 });
 
 // ------------------------------------------------------------
+// 部屋管理（RoomManager）を1つ作って、全 socket で共有する
+// ------------------------------------------------------------
+const roomManager = new RoomManager();
+
+// 1分おきに期限切れ部屋（30分間誰も参加しない待機部屋）を削除
+const CLEANUP_INTERVAL_MS = 60 * 1000;
+setInterval(() => {
+  const cleaned = roomManager.cleanupExpiredRooms();
+  if (cleaned.length > 0) {
+    console.log(`[クリーンアップ] 期限切れの部屋を ${cleaned.length} 件削除`);
+  }
+}, CLEANUP_INTERVAL_MS);
+
+// ------------------------------------------------------------
 // WebSocket 接続イベント
-// フェーズ1では「接続したよ」「切断したよ」をログに出すだけ
-// フェーズ2以降で部屋作成・打牌などのイベントを追加していく
+// 1つの socket（= 1つのブラウザタブ）が繋がるたびに、
+// この中でロビーや対局のイベントハンドラを登録する。
 // ------------------------------------------------------------
 io.on('connection', (socket) => {
   console.log(`[接続] ${socket.id}`);
-
-  socket.on('disconnect', (reason) => {
-    console.log(`[切断] ${socket.id} (理由: ${reason})`);
-  });
+  registerHandlers(io, socket, roomManager);
 });
 
 // ------------------------------------------------------------

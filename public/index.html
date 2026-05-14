@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>FEVER MJ - ロビー</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -10,77 +10,339 @@
     width: 100%; min-height: 100vh;
     background: radial-gradient(ellipse at center, #1a0033 0%, #000 100%);
     color: white;
-    font-family: 'Reggae One', 'Yu Gothic', sans-serif;
-    text-align: center;
+    font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif;
   }
-  .wrap {
-    max-width: 420px;
+
+  .app {
+    max-width: 460px;
     margin: 0 auto;
-    padding: 40px 20px;
+    padding: 24px 16px 48px;
+    min-height: 100vh;
+    position: relative;
   }
+
+  /* タイトル */
   h1 {
-    font-size: 36px;
+    text-align: center;
+    font-size: 38px;
     background: linear-gradient(45deg, #ff2d55, #ffd700, #ff00aa);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
     margin-bottom: 4px;
+    letter-spacing: 2px;
   }
-  .sub { color: rgba(255,255,255,0.5); font-size: 13px; margin-bottom: 32px; }
+  .sub {
+    text-align: center;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 12px;
+    margin-bottom: 24px;
+  }
+
+  /* 接続状態バッジ */
+  .conn-status {
+    position: fixed;
+    top: 8px;
+    right: 8px;
+    font-size: 10px;
+    padding: 4px 8px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+  .conn-status.ok  { color: #00e5ff; border-color: #00e5ff; }
+  .conn-status.bad { color: #ff2d55; border-color: #ff2d55; }
+
+  /* ビュー */
+  .view { display: none; }
+  .view.active { display: block; animation: fade-in 0.25s ease-out; }
+  @keyframes fade-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* パネル */
   .panel {
-    background: rgba(255,255,255,0.05);
-    border: 1px solid rgba(255,215,0,0.3);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 215, 0, 0.3);
     border-radius: 12px;
-    padding: 24px;
-    margin-bottom: 16px;
+    padding: 20px 18px;
+    margin-bottom: 14px;
   }
-  .status {
-    color: #00e5ff;
-    font-size: 16px;
-    margin-bottom: 8px;
-  }
-  .status.error { color: #ff2d55; }
-  .hint { font-size: 12px; color: rgba(255,255,255,0.5); }
-  .link {
-    display: inline-block;
-    margin-top: 14px;
+  .panel h2 {
+    font-size: 18px;
     color: #ffd700;
-    text-decoration: none;
-    border-bottom: 1px dashed #ffd700;
+    margin-bottom: 14px;
+    text-align: center;
+  }
+
+  /* フォーム */
+  label.field {
+    display: block;
+    margin-bottom: 14px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.8);
+  }
+  label.field span {
+    display: block;
+    margin-bottom: 4px;
+  }
+  label.field input {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(0, 0, 0, 0.4);
+    color: white;
+    font-size: 16px;
+    font-family: inherit;
+  }
+  label.field input:focus {
+    outline: none;
+    border-color: #ffd700;
+    box-shadow: 0 0 8px rgba(255, 215, 0, 0.3);
+  }
+
+  /* ボタン */
+  .btn {
+    display: block;
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: 10px;
+    font-size: 16px;
+    font-family: inherit;
+    cursor: pointer;
+    margin-bottom: 10px;
+    transition: transform 0.1s, filter 0.1s;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn-primary {
+    background: linear-gradient(135deg, #ffd700, #c9a000);
+    color: #1a1a1a;
+    font-weight: bold;
+  }
+  .btn-secondary {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+  .btn-danger {
+    background: rgba(255, 45, 85, 0.2);
+    color: #ff2d55;
+    border: 1px solid rgba(255, 45, 85, 0.4);
+  }
+  .btn:hover:not(:disabled) { filter: brightness(1.1); }
+
+  /* 待機画面 */
+  .count-box {
+    text-align: center;
+    margin: 16px 0 20px;
+  }
+  .count-box .count {
+    font-size: 44px;
+    color: #00e5ff;
+    font-weight: bold;
+  }
+  .count-box .total {
+    font-size: 22px;
+    color: rgba(255, 255, 255, 0.6);
+  }
+  .count-box .label {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-top: 4px;
+  }
+
+  ul.player-list {
+    list-style: none;
+    margin-bottom: 14px;
+  }
+  .player-row {
+    display: grid;
+    grid-template-columns: 40px 1fr auto;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    margin-bottom: 6px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
     font-size: 14px;
   }
-  .phase-note {
+  .player-row.joined { border-color: rgba(255, 215, 0, 0.3); }
+  .player-row .seat {
     font-size: 11px;
-    color: rgba(255,255,255,0.4);
-    margin-top: 24px;
+    color: #ffd700;
+    font-family: monospace;
+  }
+  .player-row .pname em {
+    color: rgba(255, 255, 255, 0.4);
+    font-style: italic;
+  }
+  .player-row .pname small {
+    color: #00e5ff;
+  }
+  .badge {
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 10px;
+  }
+  .badge.ok      { background: rgba(0, 229, 255, 0.15); color: #00e5ff; border: 1px solid rgba(0, 229, 255, 0.4); }
+  .badge.waiting { background: rgba(255, 255, 255, 0.08); color: rgba(255, 255, 255, 0.5); }
+
+  .hint {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    text-align: center;
+    margin-top: 10px;
     line-height: 1.6;
   }
+
+  /* 対局開始通知（仮表示） */
+  .start-banner {
+    text-align: center;
+    padding: 24px 16px;
+    background: linear-gradient(45deg, rgba(255, 45, 85, 0.15), rgba(255, 215, 0, 0.15));
+    border: 2px solid #ffd700;
+    border-radius: 12px;
+    margin-bottom: 14px;
+    animation: pulse-border 1.5s infinite;
+  }
+  @keyframes pulse-border {
+    0%, 100% { box-shadow: 0 0 0 rgba(255, 215, 0, 0.4); }
+    50%      { box-shadow: 0 0 20px rgba(255, 215, 0, 0.6); }
+  }
+  .start-banner h2 {
+    font-size: 22px;
+    color: #ffd700;
+    margin-bottom: 6px;
+  }
+
+  /* トースト */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    padding: 10px 18px;
+    background: rgba(0, 0, 0, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 8px;
+    color: white;
+    font-size: 13px;
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.25s;
+    max-width: 90vw;
+    z-index: 100;
+  }
+  .toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  .toast.error { border-color: #ff2d55; color: #ff8a9b; }
+  .toast.ok    { border-color: #00e5ff; color: #00e5ff; }
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="app">
+
+  <div id="conn-status" class="conn-status">接続中…</div>
+
   <h1>🀄 FEVER MJ</h1>
-  <div class="sub">オリジナル3人麻雀（オンライン対戦版）</div>
+  <div class="sub">オリジナル3人麻雀 - オンライン対戦</div>
 
-  <div class="panel">
-    <div id="connStatus" class="status">接続確認中...</div>
-    <div class="hint">サーバーとの WebSocket 接続テスト</div>
-  </div>
-
-  <div class="panel">
-    <div style="font-size:14px; color: rgba(255,255,255,0.7); margin-bottom: 8px;">
-      ロビー機能は<br><strong style="color:#ffd700;">フェーズ3</strong>で実装予定です
+  <!-- ビュー1: メニュー -->
+  <section id="view-menu" class="view active">
+    <div class="panel">
+      <h2>あそびかたを選ぶ</h2>
+      <button id="btn-create" class="btn btn-primary">🆕 部屋を作る</button>
+      <button id="btn-join" class="btn btn-secondary">🚪 部屋に入る</button>
     </div>
-    <a class="link" href="/play.html">→ 既存の対局画面（CPU対戦版）</a>
-  </div>
+    <div class="hint">
+      「部屋を作る」を選んだ人が <strong>合言葉</strong> を決めて、<br>
+      他の2人にその合言葉を伝えて参加してもらいます。
+    </div>
+  </section>
 
-  <div class="phase-note">
-    フェーズ1（MVP）: サーバー骨格のみ動作中<br>
-    次のフェーズ: ゲームロジックの分離移植
-  </div>
+  <!-- ビュー2: 部屋作成フォーム -->
+  <section id="view-create" class="view">
+    <div class="panel">
+      <h2>🆕 部屋を作る</h2>
+      <label class="field">
+        <span>あなたの名前（20文字以内）</span>
+        <input id="create-name" type="text" maxlength="20" placeholder="例: たくみ" autocomplete="off">
+      </label>
+      <label class="field">
+        <span>合言葉（他の2人に伝える）</span>
+        <input id="create-password" type="text" maxlength="50" placeholder="例: ふぃーばー" autocomplete="off">
+      </label>
+      <button id="create-submit" class="btn btn-primary">作って待機する</button>
+      <button class="btn btn-secondary btn-back">← 戻る</button>
+    </div>
+  </section>
+
+  <!-- ビュー3: 部屋参加フォーム -->
+  <section id="view-join" class="view">
+    <div class="panel">
+      <h2>🚪 部屋に入る</h2>
+      <label class="field">
+        <span>あなたの名前（20文字以内）</span>
+        <input id="join-name" type="text" maxlength="20" placeholder="例: あゆみ" autocomplete="off">
+      </label>
+      <label class="field">
+        <span>合言葉（部屋を作った人から聞く）</span>
+        <input id="join-password" type="text" maxlength="50" placeholder="例: ふぃーばー" autocomplete="off">
+      </label>
+      <button id="join-submit" class="btn btn-primary">参加する</button>
+      <button class="btn btn-secondary btn-back">← 戻る</button>
+    </div>
+  </section>
+
+  <!-- ビュー4: 待機画面 -->
+  <section id="view-waiting" class="view">
+    <div class="panel">
+      <h2 id="waiting-title">対局メンバー待ち</h2>
+      <div class="count-box">
+        <span class="count" id="player-count">1</span>
+        <span class="total">/ 3</span>
+        <div class="label">人 揃ったら自動で対局開始</div>
+      </div>
+      <ul class="player-list" id="player-list"></ul>
+      <button id="leave" class="btn btn-danger">退室する</button>
+    </div>
+    <div class="hint">
+      この画面を開いたまま、他の人の参加を待ちます。<br>
+      残りの人にも同じ合言葉で「部屋に入る」してもらってください。
+    </div>
+  </section>
+
+  <!-- ビュー5: 対局開始通知（仮・フェーズ4 で本物の対局画面に置き換え） -->
+  <section id="view-game" class="view">
+    <div class="start-banner">
+      <h2>🎉 対局開始しました！</h2>
+      <div class="hint" style="color: rgba(255,255,255,0.7); margin-top: 8px;">
+        メンバーが揃いました
+      </div>
+    </div>
+    <div class="panel">
+      <h2>対局メンバー</h2>
+      <ul class="player-list" id="game-player-list"></ul>
+    </div>
+    <div class="hint">
+      対局画面はフェーズ4 で実装します。<br>
+      現状は「3人で部屋に集まれた」ことを確認するための仮表示です。
+    </div>
+  </section>
+
+  <!-- トースト -->
+  <div id="toast" class="toast"></div>
+
 </div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="/js/socket-client.js"></script>
+<script src="/js/lobby.js"></script>
 </body>
 </html>
