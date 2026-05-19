@@ -409,6 +409,40 @@ test('GameEngine.discardTile: 打牌すると手牌が1枚減り、河に追加�
   assert.strictEqual(p0.discards[0].tile, tileToDiscard);
 });
 
+// ------------------------------------------------------------
+// state.drawnTile の管理（フェーズ4b で追加）
+// ------------------------------------------------------------
+test('GameEngine: drawTile が state.drawnTile を更新する', () => {
+  const engine = new GameEngine();
+  engine.init();
+  assert.strictEqual(engine.state.drawnTile, null, '配牌直後は null');
+
+  const result = engine.drawTile('P0');
+  assert.strictEqual(engine.state.drawnTile, result.drawn, 'ツモ牌が state に記録される');
+});
+
+test('GameEngine: discardTile が state.drawnTile を null にする', () => {
+  const engine = new GameEngine();
+  engine.init();
+  engine.drawTile('P0');
+  assert.ok(engine.state.drawnTile !== null);
+
+  const tile = engine.state.players[0].hand[0];
+  engine.discardTile('P0', tile, false);
+  assert.strictEqual(engine.state.drawnTile, null, '打牌後は null に戻る');
+});
+
+test('GameEngine: 山が空になった drawTile は ryukyoku=true と drawnTile=null を返す', () => {
+  const engine = new GameEngine();
+  engine.init();
+  // 山を空にする
+  engine.state.wall = [];
+  const result = engine.drawTile('P0');
+  assert.strictEqual(result.ryukyoku, true);
+  assert.strictEqual(result.drawn, null);
+  assert.strictEqual(engine.state.drawnTile, null);
+});
+
 test('GameEngine.nextTurn: P0 → P1 → P2 → P0 のローテーション', () => {
   const engine = new GameEngine();
   engine.init();

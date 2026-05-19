@@ -128,6 +128,8 @@ class GameEngine {
 
   drawTile(playerId) {
     if (this.state.wall.length === 0) {
+      // 山が空 → 流局。state.drawnTile も null にしておく。
+      this.state.drawnTile = null;
       return { drawn: null, ryukyoku: true };
     }
     const player = this.state.players.find((p) => p.id === playerId);
@@ -145,6 +147,8 @@ class GameEngine {
       const sortedExceptLast = sortTiles(player.hand.slice(0, -1));
       player.hand = [...sortedExceptLast, tile];
     }
+    // 今ツモった牌を state に記録（ツモ切り判定や UI 表示用）
+    this.state.drawnTile = tile;
     return { drawn: tile, ryukyoku: false };
   }
 
@@ -204,6 +208,8 @@ class GameEngine {
     }
 
     this.state.lastDiscard = { player: playerId, tile };
+    // 打牌した時点でツモ済牌はリセット（次のプレイヤーがツモる前の状態）
+    this.state.drawnTile = null;
     return true;
   }
 

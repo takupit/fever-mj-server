@@ -368,6 +368,61 @@
     font-size: 15px;
   }
 
+  /* クリック可能な牌（自分のターンで打牌可能なとき） */
+  .tile.clickable {
+    cursor: pointer;
+    transition: transform 0.1s, filter 0.1s, box-shadow 0.1s;
+  }
+  .tile.clickable:hover {
+    transform: translateY(-3px);
+    filter: brightness(1.1);
+    box-shadow: 0 3px 8px rgba(0,229,255,0.4);
+  }
+  .tile.clickable:active {
+    transform: translateY(0);
+  }
+  /* ツモ牌（手牌の右端、区切りの後） */
+  .tile.drawn {
+    box-shadow: 0 0 6px rgba(0, 229, 255, 0.5);
+    border-color: #00e5ff;
+  }
+  .tile.drawn.clickable:hover {
+    box-shadow: 0 3px 10px rgba(0,229,255,0.7);
+  }
+
+  /* 流局オーバーレイ */
+  .ryukyoku-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+  }
+  .ryukyoku-overlay.show {
+    display: flex;
+    animation: fade-in 0.4s ease-out;
+  }
+  .ryukyoku-card {
+    background: linear-gradient(180deg, #1a0033, #000);
+    border: 2px solid #ffd700;
+    border-radius: 16px;
+    padding: 32px 28px;
+    text-align: center;
+    max-width: 320px;
+    box-shadow: 0 0 24px rgba(255,215,0,0.5);
+  }
+  .ryukyoku-card h2 {
+    color: #ffd700;
+    font-size: 28px;
+    margin-bottom: 12px;
+  }
+  .ryukyoku-card p {
+    color: rgba(255,255,255,0.85);
+    font-size: 14px;
+  }
+
   /* ターン表示 */
   .turn-bar {
     padding: 8px 12px;

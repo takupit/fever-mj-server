@@ -99,6 +99,9 @@
       'game:start',
       'game:your-hand',
       'game:state-update',
+      'game:your-turn',
+      'game:action-result',
+      'game:ryukyoku',
     ].forEach((evt) => {
       socket.on(evt, (payload) => {
         // 部屋情報を受け取ったらクライアント側状態を更新
@@ -125,6 +128,11 @@
   function sendLeaveRoom() {
     if (state.socket) state.socket.emit('lobby:leave-room', {});
   }
+  // 対局中の打牌（step 1）
+  function sendDiscard({ tile, handIdx }) {
+    if (!state.socket) return;
+    state.socket.emit('game:discard', { tile, handIdx });
+  }
 
   // 他のスクリプトから使える API を window に公開
   window.feverMj = {
@@ -134,6 +142,7 @@
     sendCreateRoom,
     sendJoinRoom,
     sendLeaveRoom,
+    sendDiscard,
     clearSession,
     loadSession,
   };

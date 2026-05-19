@@ -13,6 +13,10 @@
   const view = {
     publicState: null,   // game:state-update の最新内容
     myHand: null,        // game:your-hand の最新内容
+    // 自分の操作可能状態（step 1 では打牌のみ）
+    canDiscard: false,
+    // 打牌送信中フラグ（連打防止）
+    discarding: false,
   };
 
   // ------------------------------------------------------------
@@ -135,26 +139,61 @@
     const handEl = $('#me-hand');
     handEl.innerHTML = '';
     if (!hand) return;
+
+    // 牌をクリック可能にする処理（自分のターンで打牌可能なときだけ）
+    const attachDiscard = (tileEl, tile, handIdx) => {
+      if (!view.canDiscard) return;
+      tileEl.classList.add('clickable');
+      tileEl.addEventListener('click', () => onTileClick(tile, handIdx));
+    };
+
     // ツモ牌があれば手牌13枚 + ツモ牌1枚を分けて表示
-    if (drawnTile) {
+    if (drawnTile && hand.length > 0 && hand[hand.length - 1] === drawnTile) {
+      // 通常は手牌の末尾にツモ牌が来る配置（CPU プレイの仕様）
       const baseTiles = hand.slice(0, -1);
-      for (const t of baseTiles) handEl.appendChild(makeTileEl(t));
+      baseTiles.forEach((t, i) => {
+        const el = makeTileEl(t);
+        attachDiscard(el, t, i);
+        handEl.appendChild(el);
+      });
       // 区切り
       const gap = document.createElement('span');
       gap.style.cssText = 'width:6px; display:inline-block;';
       handEl.appendChild(gap);
-      handEl.appendChild(makeTileEl(drawnTile));
+      // ツモ牌（手牌配列の最後）
+      const drawnEl = makeTileEl(drawnTile);
+      drawnEl.classList.add('drawn');
+      attachDiscard(drawnEl, drawnTile, hand.length - 1);
+      handEl.appendChild(drawnEl);
     } else {
-      for (const t of hand) handEl.appendChild(makeTileEl(t));
+      // ツモ牌なし（または並びが特殊） → 普通に並べる
+      hand.forEach((t, i) => {
+        const el = makeTileEl(t);
+        attachDiscard(el, t, i);
+        handEl.appendChild(el);
+      });
     }
+  }
+
+  // 牌クリック → 打牌送信
+  function onTileClick(tile, handIdx) {
+    if (!view.canDiscard || view.discarding) return;
+    view.discarding = true;
+    view.canDiscard = false;
+    rerender();  // クリック直後にクリック不可状態へ
+    fm.sendDiscard({ tile, handIdx });
   }
 
   function renderTurn(publicState, myPlayerId) {
     const currentName = publicState.players.find((p) => p.id === publicState.currentTurn)?.name || '?';
     const isMyTurn = publicState.currentTurn === myPlayerId;
-    $('#turn-text').textContent = isMyTurn
-      ? '★ あなたのターンです'
-      : `${currentName} さんのターン待ち`;
+    if (isMyTurn) {
+      $('#turn-text').textContent = view.canDiscard
+        ? '★ あなたのターン: 捨てる牌をクリック'
+        : '★ あなたのターン';
+    } else {
+      $('#turn-text').textContent = `${currentName} さんのターン待ち`;
+    }
     $('#turn-bar').classList.toggle('my-turn', isMyTurn);
   }
 
@@ -192,19 +231,82 @@
     // 公開状態の更新（部屋全員に届く）
     fm.on('game:state-update', (publicState) => {
       view.publicState = publicState;
+      // 自分以外のターンになったら打牌不可
+      if (publicState.currentTurn !== fm.state.playerId) {
+        view.canDiscard = false;
+      }
       rerender();
     });
 
     // 自分の手牌（本人だけに届く）
     fm.on('game:your-hand', (privateHand) => {
       view.myHand = privateHand;
+      view.discarding = false;  // 送信ロックを解除
+      rerender();
+    });
+
+    // 自分のターンが来た → 打牌可能に
+    fm.on('game:your-turn', ({ options }) => {
+      view.canDiscard = Array.isArray(options) && options.includes('discard');
+      view.discarding = false;
+      rerender();
+    });
+
+    // 誰かが何かしたという通知（ログ的に使う・トーストは過剰なので控えめに）
+    fm.on('game:action-result', ({ action, playerId, tile, isTsumogiri }) => {
+      if (!view.publicState) return;
+      if (action === 'discard') {
+        const name = view.publicState.players.find((p) => p.id === playerId)?.name || playerId;
+        if (playerId !== fm.state.playerId) {
+          showToast(`${name} が ${tileToLabel(tile)} を${isTsumogiri ? 'ツモ切り' : '打牌'}`, 'info', 1200);
+        }
+      }
+    });
+
+    // 流局通知（step 1 は山切れの仮表示のみ）
+    fm.on('game:ryukyoku', ({ reason, message }) => {
+      view.canDiscard = false;
+      view.discarding = false;
+      showRyukyokuOverlay(message || '流局しました');
       rerender();
     });
 
     // 接続切れたら表示をクリア（再接続時に古い手牌が見えないように）
     fm.on('disconnected', () => {
       view.myHand = null;
+      view.canDiscard = false;
     });
+  }
+
+  // 簡易トースト（lobby.js のトーストを再利用するため #toast を使う）
+  function showToast(message, type = 'info', duration = 1500) {
+    const el = document.getElementById('toast');
+    if (!el) return;
+    el.textContent = message;
+    el.className = 'toast show ' + type;
+    setTimeout(() => { el.className = 'toast'; }, duration);
+  }
+
+  // 流局オーバーレイ
+  function showRyukyokuOverlay(message) {
+    let el = document.getElementById('ryukyoku-overlay');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'ryukyoku-overlay';
+      el.className = 'ryukyoku-overlay';
+      el.innerHTML = `
+        <div class="ryukyoku-card">
+          <h2>🏁 流局</h2>
+          <p id="ryukyoku-message"></p>
+          <p class="hint" style="margin-top:12px;">
+            （次局への進行はフェーズ4d で実装します）
+          </p>
+        </div>
+      `;
+      document.body.appendChild(el);
+    }
+    el.querySelector('#ryukyoku-message').textContent = message;
+    el.classList.add('show');
   }
 
   // ------------------------------------------------------------
