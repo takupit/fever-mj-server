@@ -219,6 +219,174 @@
     margin-bottom: 6px;
   }
 
+  /* ===========================
+     対局画面（フェーズ4a）
+     =========================== */
+  .game-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    font-size: 12px;
+    margin-bottom: 8px;
+  }
+  .game-header-left { display: flex; gap: 10px; align-items: baseline; }
+  .game-header-right { color: rgba(255,255,255,0.7); }
+  .round-label { font-size: 16px; color: #ffd700; font-weight: bold; }
+  .honba-label { color: rgba(255,255,255,0.6); }
+  .wall-label strong { color: #ffd700; font-size: 14px; }
+
+  /* ドラ表示 */
+  .dora-area {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    margin-bottom: 8px;
+  }
+  .dora-title { font-size: 11px; color: #ffd700; min-width: 50px; }
+
+  /* 牌の見た目 */
+  .tile {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 32px;
+    background: linear-gradient(180deg, #fff8e1 0%, #f0e0b0 100%);
+    border: 1.5px solid #8b6914;
+    border-radius: 4px;
+    font-size: 14px;
+    line-height: 1;
+    color: #1a1a1a;
+    font-weight: bold;
+    font-family: 'Yu Gothic', sans-serif;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    user-select: none;
+  }
+  .tile.red       { color: #c62828; }
+  .tile.fever     { box-shadow: 0 0 6px rgba(255, 215, 0, 0.7); border-color: #ffd700; }
+  .tile.back {
+    background: linear-gradient(135deg, #4a3a1a, #2a1a08);
+    border-color: #1a0a00;
+    color: transparent;
+  }
+  .tile.back::after {
+    content: '';
+    width: 60%; height: 70%;
+    border: 1px solid rgba(255,215,0,0.2);
+    border-radius: 2px;
+  }
+  .tile-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    min-height: 32px;
+  }
+  .tile-row-small .tile {
+    width: 18px;
+    height: 24px;
+    font-size: 11px;
+  }
+
+  /* 対戦相手エリア */
+  .opponents-area {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .opponent {
+    padding: 8px 10px;
+  }
+  .opponent.current-turn {
+    border-color: #00e5ff;
+    box-shadow: 0 0 8px rgba(0, 229, 255, 0.4);
+  }
+  .opp-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 6px;
+    font-size: 12px;
+  }
+  .opp-name { font-weight: bold; color: #fff; }
+  .opp-wind { color: #ffd700; font-size: 11px; }
+  .opp-score { color: #00e5ff; font-family: monospace; }
+  .opp-body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .opp-section {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .opp-section-label {
+    font-size: 10px;
+    color: rgba(255,255,255,0.5);
+    min-width: 32px;
+    padding-top: 4px;
+  }
+
+  /* 自分の卓 */
+  .me-area {
+    padding: 10px;
+    margin-bottom: 8px;
+    border-color: rgba(0, 229, 255, 0.4);
+  }
+  .me-area.current-turn {
+    border-color: #00e5ff;
+    box-shadow: 0 0 12px rgba(0, 229, 255, 0.5);
+  }
+  .me-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 8px;
+    font-size: 13px;
+  }
+  .me-name { font-weight: bold; color: #fff; }
+  .me-wind { color: #ffd700; }
+  .me-score { color: #00e5ff; font-family: monospace; font-size: 14px; }
+  .me-section {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  .me-section-label {
+    font-size: 11px;
+    color: rgba(255,255,255,0.5);
+    min-width: 36px;
+    padding-top: 6px;
+  }
+  #me-hand .tile {
+    width: 28px;
+    height: 38px;
+    font-size: 15px;
+  }
+
+  /* ターン表示 */
+  .turn-bar {
+    padding: 8px 12px;
+    text-align: center;
+    font-size: 13px;
+    color: #ffd700;
+    margin-bottom: 8px;
+  }
+  .turn-bar.my-turn {
+    background: rgba(0, 229, 255, 0.1);
+    border-color: #00e5ff;
+    color: #00e5ff;
+    animation: my-turn-pulse 1.5s infinite;
+  }
+  @keyframes my-turn-pulse {
+    0%, 100% { box-shadow: 0 0 4px rgba(0,229,255,0.3); }
+    50%      { box-shadow: 0 0 14px rgba(0,229,255,0.6); }
+  }
+
   /* トースト */
   .toast {
     position: fixed;
@@ -318,21 +486,90 @@
     </div>
   </section>
 
-  <!-- ビュー5: 対局開始通知（仮・フェーズ4 で本物の対局画面に置き換え） -->
+  <!-- ビュー5: 対局画面（フェーズ4a: 配牌＋自分の手牌表示まで） -->
   <section id="view-game" class="view">
-    <div class="start-banner">
-      <h2>🎉 対局開始しました！</h2>
-      <div class="hint" style="color: rgba(255,255,255,0.7); margin-top: 8px;">
-        メンバーが揃いました
+
+    <!-- 卓ヘッダ: 局・本場・残り山 -->
+    <div class="game-header panel">
+      <div class="game-header-left">
+        <span class="round-label" id="game-round">--</span>
+        <span class="honba-label" id="game-honba">0本場</span>
+      </div>
+      <div class="game-header-right">
+        <span class="wall-label">残り <strong id="game-wall">--</strong> 枚</span>
       </div>
     </div>
-    <div class="panel">
-      <h2>対局メンバー</h2>
-      <ul class="player-list" id="game-player-list"></ul>
+
+    <!-- ドラ表示牌 -->
+    <div class="dora-area panel">
+      <span class="dora-title">ドラ表示</span>
+      <div class="tile-row" id="game-dora"></div>
     </div>
+
+    <!-- 対戦相手2人（縦に並べる） -->
+    <div class="opponents-area">
+      <div class="opponent panel" data-seat="left" id="opp-left">
+        <div class="opp-head">
+          <span class="opp-name">--</span>
+          <span class="opp-wind">--</span>
+          <span class="opp-score">--</span>
+        </div>
+        <div class="opp-body">
+          <div class="opp-section">
+            <span class="opp-section-label">手牌</span>
+            <div class="tile-row" data-role="hand"></div>
+          </div>
+          <div class="opp-section">
+            <span class="opp-section-label">河</span>
+            <div class="tile-row tile-row-small" data-role="discards"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="opponent panel" data-seat="right" id="opp-right">
+        <div class="opp-head">
+          <span class="opp-name">--</span>
+          <span class="opp-wind">--</span>
+          <span class="opp-score">--</span>
+        </div>
+        <div class="opp-body">
+          <div class="opp-section">
+            <span class="opp-section-label">手牌</span>
+            <div class="tile-row" data-role="hand"></div>
+          </div>
+          <div class="opp-section">
+            <span class="opp-section-label">河</span>
+            <div class="tile-row tile-row-small" data-role="discards"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 自分の卓 -->
+    <div class="me-area panel">
+      <div class="me-head">
+        <span class="me-name" id="me-name">--</span>
+        <span class="me-wind" id="me-wind">--</span>
+        <span class="me-score" id="me-score">--</span>
+      </div>
+      <div class="me-section">
+        <span class="me-section-label">河</span>
+        <div class="tile-row tile-row-small" id="me-discards"></div>
+      </div>
+      <div class="me-section">
+        <span class="me-section-label">手牌</span>
+        <div class="tile-row" id="me-hand"></div>
+      </div>
+    </div>
+
+    <!-- ターン表示 -->
+    <div class="turn-bar panel" id="turn-bar">
+      <span id="turn-text">--</span>
+    </div>
+
     <div class="hint">
-      対局画面はフェーズ4 で実装します。<br>
-      現状は「3人で部屋に集まれた」ことを確認するための仮表示です。
+      フェーズ4a: 配牌と自分の手牌が表示されるところまで。<br>
+      打牌・ツモはフェーズ4b 以降で実装します。
     </div>
   </section>
 
@@ -344,5 +581,6 @@
 <script src="/socket.io/socket.io.js"></script>
 <script src="/js/socket-client.js"></script>
 <script src="/js/lobby.js"></script>
+<script src="/js/game.js"></script>
 </body>
 </html>

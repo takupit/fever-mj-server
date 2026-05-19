@@ -87,14 +87,18 @@
       emitLocal('connect_error', { message: err.message });
     });
 
-    // ロビー系のイベントを listeners に転送
+    // サーバーからのイベントを listeners に転送
     [
+      // ロビー系
       'lobby:room-created',
       'lobby:room-joined',
       'lobby:player-joined',
       'lobby:player-left',
       'lobby:error',
+      // 対局系
       'game:start',
+      'game:your-hand',
+      'game:state-update',
     ].forEach((evt) => {
       socket.on(evt, (payload) => {
         // 部屋情報を受け取ったらクライアント側状態を更新

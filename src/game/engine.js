@@ -45,7 +45,11 @@ class GameEngine {
   }
 
   // 1局を初期化（前局の点数・チップ・親などを引き継ぎ可能）
-  init(carryOver = null) {
+  // options:
+  //   playerNames: [string, string, string]  - 各プレイヤーの表示名（オンライン対戦用）
+  //   playerIsCpu: [bool, bool, bool]         - CPU 扱いするか（オンラインなら全 false）
+  // 既定値は単独プレイモード（P0 が人間、P1/P2 が CPU）。
+  init(carryOver = null, options = {}) {
     // 牌山を生成してシャッフル
     const tiles = shuffleTiles(buildTileSet());
 
@@ -58,30 +62,33 @@ class GameEngine {
     const carryReachSticks = carryOver ? carryOver.reachSticks : 0;
     const carryDealerId = carryOver ? carryOver.dealerId : 'P0';
 
+    // プレイヤー名・CPU フラグ（既定は単独プレイモード）
+    const playerNames = options.playerNames || ['あなた', 'CPU 1', 'CPU 2'];
+    const playerIsCpu = options.playerIsCpu || [false, true, true];
+
     // 自風は親に応じて決まる（3人麻雀：東家・南家・西家）
     const dealerIdx = parseInt(carryDealerId.slice(1), 10);
     const getWind = (playerIdx) => WINDS_ORDER[(playerIdx - dealerIdx + 3) % 3];
 
-    const players = [
-      { id: 'P0', name: 'あなた', wind: getWind(0), score: carryScores[0], chips: carryChips[0],
-        hand: [], discards: [], melds: [], kitaPulls: [],
-        isReached: false, ipatsuActive: false,
-        feverActive: false, feverTrigger: null,
-        missedRonTiles: [], kitaRinshanActive: false,
-        isCpu: false },
-      { id: 'P1', name: 'CPU 1', wind: getWind(1), score: carryScores[1], chips: carryChips[1],
-        hand: [], discards: [], melds: [], kitaPulls: [],
-        isReached: false, ipatsuActive: false,
-        feverActive: false, feverTrigger: null,
-        missedRonTiles: [], kitaRinshanActive: false,
-        isCpu: true },
-      { id: 'P2', name: 'CPU 2', wind: getWind(2), score: carryScores[2], chips: carryChips[2],
-        hand: [], discards: [], melds: [], kitaPulls: [],
-        isReached: false, ipatsuActive: false,
-        feverActive: false, feverTrigger: null,
-        missedRonTiles: [], kitaRinshanActive: false,
-        isCpu: true },
-    ];
+    const makePlayer = (idx) => ({
+      id: `P${idx}`,
+      name: playerNames[idx],
+      wind: getWind(idx),
+      score: carryScores[idx],
+      chips: carryChips[idx],
+      hand: [],
+      discards: [],
+      melds: [],
+      kitaPulls: [],
+      isReached: false,
+      ipatsuActive: false,
+      feverActive: false,
+      feverTrigger: null,
+      missedRonTiles: [],
+      kitaRinshanActive: false,
+      isCpu: playerIsCpu[idx],
+    });
+    const players = [makePlayer(0), makePlayer(1), makePlayer(2)];
 
     // 13枚ずつ配牌
     let cursor = 0;
@@ -112,8 +119,10 @@ class GameEngine {
       phase: 'init',
     };
 
-    // 自分（P0）は手牌をソート（CPU は描画しないのでソート不要）
-    players[0].hand = sortTiles(players[0].hand);
+    // 人間プレイヤーの手牌はソート（CPU はソート不要）
+    players.forEach((p) => {
+      if (!p.isCpu) p.hand = sortTiles(p.hand);
+    });
     return this.state;
   }
 

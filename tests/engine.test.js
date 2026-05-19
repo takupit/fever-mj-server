@@ -119,6 +119,54 @@ test('GameEngine.init: 初期点数25000・初期チップ100・割れ目あり'
   assert.ok(['P0', 'P1', 'P2'].includes(engine.state.warePlayer), '割れ目はP0/P1/P2のいずれか');
 });
 
+test('GameEngine.init: playerNames オプションで名前を上書きできる（オンライン対戦）', () => {
+  const engine = new GameEngine();
+  engine.init(null, {
+    playerNames: ['たくみ', 'あゆみ', 'けんじ'],
+    playerIsCpu: [false, false, false],
+  });
+
+  assert.strictEqual(engine.state.players[0].name, 'たくみ');
+  assert.strictEqual(engine.state.players[1].name, 'あゆみ');
+  assert.strictEqual(engine.state.players[2].name, 'けんじ');
+  // オンライン対戦では全員人間扱い
+  for (const p of engine.state.players) {
+    assert.strictEqual(p.isCpu, false);
+  }
+});
+
+test('GameEngine.init: 引数なし呼び出しでは従来通り P0 が人間、P1/P2 が CPU', () => {
+  const engine = new GameEngine();
+  engine.init();
+
+  assert.strictEqual(engine.state.players[0].name, 'あなた');
+  assert.strictEqual(engine.state.players[0].isCpu, false);
+  assert.strictEqual(engine.state.players[1].name, 'CPU 1');
+  assert.strictEqual(engine.state.players[1].isCpu, true);
+  assert.strictEqual(engine.state.players[2].name, 'CPU 2');
+  assert.strictEqual(engine.state.players[2].isCpu, true);
+});
+
+test('GameEngine.init: オンライン対戦では全プレイヤーの手牌がソートされる', () => {
+  const engine = new GameEngine();
+  engine.init(null, {
+    playerNames: ['A', 'B', 'C'],
+    playerIsCpu: [false, false, false],
+  });
+
+  // 各プレイヤーの手牌がソート済（隣接2枚を比較するとあるべき順序）
+  for (const p of engine.state.players) {
+    const suitOrder = { m: 0, p: 1, s: 2, z: 3 };
+    for (let i = 1; i < p.hand.length; i++) {
+      const prev = p.hand[i - 1].replace('r', '');
+      const cur = p.hand[i].replace('r', '');
+      const prevKey = suitOrder[prev[0]] * 10 + parseInt(prev[1], 10);
+      const curKey = suitOrder[cur[0]] * 10 + parseInt(cur[1], 10);
+      assert.ok(prevKey <= curKey, `${p.id} の手牌がソート済 (${prev} → ${cur})`);
+    }
+  }
+});
+
 // ============================================================
 // 3. 牌操作ユーティリティのテスト
 // ============================================================

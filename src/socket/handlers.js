@@ -9,6 +9,8 @@
 // ============================================================
 
 const { C2S, S2C } = require('./events');
+const { GameEngine } = require('../game/engine');
+const { publicGameView, privateHandView } = require('./game-view');
 
 // クライアントから受け取った値を安全に正規化（trim・長さ制限）
 function sanitize(payload) {
@@ -87,13 +89,9 @@ function registerHandlers(io, socket, roomManager) {
 
       console.log(`[部屋参加] roomId=${room.id} player=${name} (${playerId}) members=${room.players.length}/3`);
 
-      // 3人揃ったらゲーム開始を全員に通知
+      // 3人揃ったら対局を開始
       if (isFull) {
-        io.to(roomChannel(room.id)).emit(S2C.GAME_START, {
-          roomId: room.id,
-          players: room.players.map((p) => ({ id: p.id, name: p.name })),
-        });
-        console.log(`[対局開始] roomId=${room.id}`);
+        startGameInRoom(io, room);
       }
 
       if (typeof ack === 'function') ack({ ok: true });
@@ -117,6 +115,59 @@ function registerHandlers(io, socket, roomManager) {
   socket.on('disconnect', (reason) => {
     handleLeave(io, socket, roomManager, `切断: ${reason}`);
   });
+}
+
+// -----------------------------------------------------------------
+// 対局開始処理（3人揃った時に呼ばれる）
+//   1. GameEngine インスタンスを作って室内に保持
+//   2. プレイヤー名を引き継いで init（配牌＋ドラ決定）
+//   3. game:start を全員にブロードキャスト
+//   4. game:your-hand を各プレイヤー本人にのみ送信
+//   5. game:state-update を全員にブロードキャスト
+// -----------------------------------------------------------------
+function startGameInRoom(io, room) {
+  const engine = new GameEngine();
+  const playerNames = room.players.map((p) => p.name);
+  engine.init(null, {
+    playerNames,
+    playerIsCpu: [false, false, false], // オンライン対戦は全員人間
+  });
+
+  // 部屋に GameEngine を紐付け（フェーズ4b 以降の打牌処理で参照する）
+  room.gameEngine = engine;
+  room.state = 'in-game';
+
+  // 1. 対局開始通知（公開可能な情報のみ）
+  io.to(roomChannel(room.id)).emit(S2C.GAME_START, {
+    roomId: room.id,
+    players: engine.state.players.map((p) => ({
+      id: p.id,
+      name: p.name,
+      wind: p.wind,
+    })),
+    dealerId: engine.state.dealerId,
+    warePlayer: engine.state.warePlayer,
+  });
+
+  // 2. 各プレイヤー本人にのみ「自分の手牌」を送る（仕様書 セキュリティ 1）
+  for (let i = 0; i < room.players.length; i++) {
+    const roomPlayer = room.players[i];
+    const enginePlayerId = engine.state.players[i].id; // P0/P1/P2
+    if (roomPlayer.socketId) {
+      io.to(roomPlayer.socketId).emit(
+        S2C.GAME_YOUR_HAND,
+        privateHandView(engine.state, enginePlayerId)
+      );
+    }
+  }
+
+  // 3. 公開状態を全員にブロードキャスト
+  io.to(roomChannel(room.id)).emit(
+    S2C.GAME_STATE_UPDATE,
+    publicGameView(engine.state)
+  );
+
+  console.log(`[対局開始] roomId=${room.id} dealer=${engine.state.dealerId} ware=${engine.state.warePlayer}`);
 }
 
 // 退室共通処理: 残メンバーに通知 or 部屋削除

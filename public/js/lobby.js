@@ -174,16 +174,8 @@
       toast(message, 'error');
     });
 
-    // 3人揃って対局開始（仮表示）
-    fm.on('game:start', ({ players }) => {
-      const list = $('#game-player-list');
-      list.innerHTML = '';
-      for (const p of players) {
-        const li = document.createElement('li');
-        const isMe = p.id === fm.state.playerId;
-        li.innerHTML = `<strong>${p.id}</strong>: ${escapeHtml(p.name)}${isMe ? '（あなた）' : ''}`;
-        list.appendChild(li);
-      }
+    // 3人揃って対局開始 → ビューを切り替える（描画は game.js が担当）
+    fm.on('game:start', () => {
       showView('view-game');
       toast('対局開始しました！', 'ok');
     });
