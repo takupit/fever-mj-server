@@ -761,6 +761,39 @@ class GameEngine {
     return candidates[0].tile;
   }
 
+  // リーチ可能か（boolean）。cpuCheckReach の薄いラッパー。
+  // フェーズ4b step 2 で your-turn ペイロードに含めるために追加。
+  canReach(playerId) {
+    const player = this.state.players.find((p) => p.id === playerId);
+    if (!player) return false;
+    return this.cpuCheckReach(player) !== false;
+  }
+
+  // リーチで打牌可能な牌のインデックス一覧を返す
+  //   戻り値: [{ discardIdx, discardTile, isFuriten }] （cpuCheckReach の全候補版）
+  getReachOptions(playerId) {
+    const player = this.state.players.find((p) => p.id === playerId);
+    if (!player) return [];
+    if (player.isReached) return [];
+    if (player.score < 1000) return [];
+    if (this.state.wall.length < 4) return [];
+    if (player.melds.some((m) => m.type !== 'ankan')) return [];
+
+    const options = [];
+    for (let i = 0; i < player.hand.length; i++) {
+      if (player.hand[i] === 'z4') continue; // 北は河に出せない
+      const test = [...player.hand];
+      test.splice(i, 1);
+      if (isTenpai(test, player.melds)) {
+        const waits = getWaitingTiles(test, player.melds);
+        const ownDiscards = player.discards.map((d) => tileBase(d.tile));
+        const isFuriten = waits.some((w) => ownDiscards.includes(tileBase(w)));
+        options.push({ discardIdx: i, discardTile: player.hand[i], isFuriten });
+      }
+    }
+    return options;
+  }
+
   // リーチ判定（14枚状態で）- フリテンも検出
   // 戻り値: false | { discardIdx, discardTile, isFuriten }
   cpuCheckReach(player) {

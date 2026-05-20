@@ -443,6 +443,52 @@ test('GameEngine: 山が空になった drawTile は ryukyoku=true と drawnTile
   assert.strictEqual(engine.state.drawnTile, null);
 });
 
+// ------------------------------------------------------------
+// リーチ判定（フェーズ4b step 2 で追加）
+// ------------------------------------------------------------
+test('GameEngine.canReach: ノーテン手では false', () => {
+  const engine = new GameEngine();
+  engine.init();
+  const p0 = engine.state.players[0];
+  // 明らかにバラバラの手にする
+  p0.hand = ['m1','m3','m5','m7','p2','p4','p6','p8','s1','z1','z3','z5','z7','m9'];
+  assert.strictEqual(engine.canReach('P0'), false);
+});
+
+test('GameEngine.canReach: テンパイ手で十分点数+山残ならリーチ可能', () => {
+  const engine = new GameEngine();
+  engine.init();
+  const p0 = engine.state.players[0];
+  // 234m 234m 234p 234p 99m + ツモ1枚 = どれを切ってもテンパイ崩しなければ
+  // 例: 234m 234m 234p 234p 99m + 5m → 切る牌によりテンパイ維持できる
+  p0.hand = ['m2','m3','m4','m2','m3','m4','p2','p3','p4','p2','p3','p4','m9','m9'];
+  assert.strictEqual(engine.canReach('P0'), true);
+});
+
+test('GameEngine.canReach: 持ち点1000未満ならリーチ不可', () => {
+  const engine = new GameEngine();
+  engine.init();
+  const p0 = engine.state.players[0];
+  p0.hand = ['m2','m3','m4','m2','m3','m4','p2','p3','p4','p2','p3','p4','m9','m9'];
+  p0.score = 500;
+  assert.strictEqual(engine.canReach('P0'), false);
+});
+
+test('GameEngine.getReachOptions: テンパイになる打牌候補を全部返す', () => {
+  const engine = new GameEngine();
+  engine.init();
+  const p0 = engine.state.players[0];
+  p0.hand = ['m2','m3','m4','m2','m3','m4','p2','p3','p4','p2','p3','p4','m9','m9'];
+  const options = engine.getReachOptions('P0');
+  assert.ok(Array.isArray(options));
+  assert.ok(options.length >= 1, 'テンパイ手なので最低1つの打牌候補がある');
+  for (const opt of options) {
+    assert.strictEqual(typeof opt.discardIdx, 'number');
+    assert.strictEqual(typeof opt.discardTile, 'string');
+    assert.strictEqual(typeof opt.isFuriten, 'boolean');
+  }
+});
+
 test('GameEngine.nextTurn: P0 → P1 → P2 → P0 のローテーション', () => {
   const engine = new GameEngine();
   engine.init();

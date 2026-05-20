@@ -390,6 +390,99 @@
     box-shadow: 0 3px 10px rgba(0,229,255,0.7);
   }
 
+  /* アクションボタンエリア */
+  .action-area {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 0 4px;
+    margin-bottom: 8px;
+    min-height: 0;
+  }
+  .action-area:empty { display: none; }
+  .action-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .action-btn {
+    padding: 10px 14px;
+    border: none;
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: transform 0.1s, filter 0.1s;
+  }
+  .action-btn:active { transform: translateY(1px); }
+  .action-btn:hover { filter: brightness(1.1); }
+  .action-btn.pon  { background: linear-gradient(135deg, #ff8c00, #cc6600); color: #1a0e00; }
+  .action-btn.kan  { background: linear-gradient(135deg, #ba68c8, #6a1b9a); color: #fff; }
+  .action-btn.reach { background: linear-gradient(135deg, #ffd700, #c9a000); color: #1a1a1a; }
+  .action-btn.skip { background: rgba(255,255,255,0.12); color: rgba(255,255,255,0.85); border: 1px solid rgba(255,255,255,0.2); }
+  .action-btn.cancel { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.15); }
+  .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* 鳴き応答カウントダウン */
+  .claim-bar {
+    background: linear-gradient(90deg, rgba(255,45,85,0.2), rgba(255,140,0,0.2));
+    border: 2px solid #ff8c00;
+    border-radius: 10px;
+    padding: 10px;
+    text-align: center;
+    animation: claim-pulse 0.6s infinite alternate;
+  }
+  @keyframes claim-pulse {
+    from { box-shadow: 0 0 4px rgba(255,140,0,0.4); }
+    to   { box-shadow: 0 0 14px rgba(255,140,0,0.8); }
+  }
+  .claim-title {
+    font-size: 13px;
+    color: #ffd700;
+    margin-bottom: 6px;
+  }
+  .claim-countdown {
+    font-size: 18px;
+    color: #ff8c00;
+    font-weight: bold;
+    font-family: monospace;
+  }
+  .claim-target-tile {
+    display: inline-block;
+    margin: 0 4px;
+    vertical-align: middle;
+  }
+
+  /* リーチ宣言モード時：選択可能な牌だけ強調、他は薄く */
+  .me-area.reach-mode #me-hand .tile {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+  .me-area.reach-mode #me-hand .tile.reach-candidate {
+    opacity: 1;
+    cursor: pointer;
+    box-shadow: 0 0 8px rgba(255, 215, 0, 0.7);
+    border-color: #ffd700;
+  }
+  .me-area.reach-mode #me-hand .tile.reach-candidate.furiten {
+    box-shadow: 0 0 8px rgba(255, 100, 100, 0.6);
+    border-color: #ff5050;
+  }
+
+  /* リーチ宣言済み手牌の自分側マーカー */
+  .reach-banner {
+    display: inline-block;
+    padding: 2px 8px;
+    background: linear-gradient(90deg, #00e5ff, #00aacc);
+    color: #001a1f;
+    font-size: 11px;
+    border-radius: 8px;
+    font-weight: bold;
+    margin-left: 6px;
+  }
+
   /* 流局オーバーレイ */
   .ryukyoku-overlay {
     position: fixed;
@@ -622,9 +715,12 @@
       <span id="turn-text">--</span>
     </div>
 
+    <!-- アクションボタンエリア（鳴き応答・暗カン・加カン・リーチ等） -->
+    <div class="action-area" id="action-area"></div>
+
     <div class="hint">
-      フェーズ4a: 配牌と自分の手牌が表示されるところまで。<br>
-      打牌・ツモはフェーズ4b 以降で実装します。
+      フェーズ4b step 2: 鳴き（ポン・カン）・リーチに対応。<br>
+      ツモアガリ・ロンはフェーズ4b step 3 で実装します。
     </div>
   </section>
 

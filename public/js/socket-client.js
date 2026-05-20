@@ -100,6 +100,7 @@
       'game:your-hand',
       'game:state-update',
       'game:your-turn',
+      'game:waiting-claim',
       'game:action-result',
       'game:ryukyoku',
     ].forEach((evt) => {
@@ -128,10 +129,27 @@
   function sendLeaveRoom() {
     if (state.socket) state.socket.emit('lobby:leave-room', {});
   }
-  // 対局中の打牌（step 1）
+  // 対局中のアクション群
   function sendDiscard({ tile, handIdx }) {
     if (!state.socket) return;
     state.socket.emit('game:discard', { tile, handIdx });
+  }
+  function sendPon() {
+    if (!state.socket) return;
+    state.socket.emit('game:pon', {});
+  }
+  // type: 'ankan' | 'kakan' | 'minkan'
+  function sendKan({ type, tile }) {
+    if (!state.socket) return;
+    state.socket.emit('game:kan', { type, tile });
+  }
+  function sendReach({ tile, handIdx }) {
+    if (!state.socket) return;
+    state.socket.emit('game:reach', { tile, handIdx });
+  }
+  function sendSkip() {
+    if (!state.socket) return;
+    state.socket.emit('game:skip', {});
   }
 
   // 他のスクリプトから使える API を window に公開
@@ -143,6 +161,10 @@
     sendJoinRoom,
     sendLeaveRoom,
     sendDiscard,
+    sendPon,
+    sendKan,
+    sendReach,
+    sendSkip,
     clearSession,
     loadSession,
   };
