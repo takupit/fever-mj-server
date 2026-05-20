@@ -22,6 +22,8 @@
     // 鳴き応答中の状態（game:waiting-claim 受信時にセット）
     pendingClaim: null,  // { discardingPlayer, tile, options, timeoutMs, startedAt }
     claimCountdownTimer: null,
+    // FEVER 発動検出用: 前回の状態で誰が FEVER だったかを記録
+    prevFeverActivePlayers: new Set(),
   };
 
   // ------------------------------------------------------------
@@ -787,6 +789,20 @@
   function bindEvents() {
     // 公開状態の更新（部屋全員に届く）
     fm.on('game:state-update', (publicState) => {
+      // FEVER 発動検出: 前回 FEVER でなかった人が今回 FEVER になっていたら花火
+      const nowFever = new Set(
+        publicState.players.filter((p) => p.feverActive).map((p) => p.id)
+      );
+      for (const pid of nowFever) {
+        if (!view.prevFeverActivePlayers.has(pid)) {
+          const player = publicState.players.find((p) => p.id === pid);
+          const isDouble = player && player.feverTrigger === 'double';
+          showFeverFireworks(isDouble);
+          break; // 1局1回でOK
+        }
+      }
+      view.prevFeverActivePlayers = nowFever;
+
       view.publicState = publicState;
       // 自分以外のターンになったら打牌不可 + your-turn の選択肢もクリア
       if (publicState.currentTurn !== fm.state.playerId) {
@@ -880,9 +896,21 @@
       view.reachMode = false;
       view.pendingClaim = null;
       stopClaimCountdown();
-      // ロン / ツモ のカットイン演出を先に出してから、少し遅らせてアガリ画面
+
+      // ロン時：振り込み者の最後の捨て牌を赤点滅させる
+      if (!payload.isTsumo && payload.fromPlayer && payload.winningTile) {
+        flashLoserDiscard(payload.fromPlayer.id, payload.winningTile);
+      }
+
+      // ロン/ツモ のカットイン演出を先に出してから、少し遅らせてアガリ画面
       showActionSplash(payload.isTsumo ? 'ツモ' : 'ロン', payload.isTsumo ? 'tsumo' : 'ron');
-      setTimeout(() => showAgariOverlay(payload), 1200);
+      setTimeout(() => {
+        showAgariOverlay(payload);
+        // アガリ画面表示の 0.5 秒後にチップ移動アニメ
+        if (payload.chipMoves) {
+          setTimeout(() => animateChipMovesInOverlay(payload), 500);
+        }
+      }, 1200);
       rerender();
     });
 
@@ -1054,6 +1082,313 @@
     cutinEl.appendChild(textWrap);
 
     setTimeout(() => { cutinEl.innerHTML = ''; }, 1500);
+  }
+
+  // ------------------------------------------------------------
+  // FEVER 花火（仕様書 7. FEVER 視覚演出）
+  //   Canvas ベースで全画面に花火、3 秒間。
+  //   isDouble なら W-FEVER!! 表示 + 白金系の色味
+  // ------------------------------------------------------------
+  let feverAnimId = null;
+  let feverLaunchInterval = null;
+  function showFeverFireworks(isDouble) {
+    const overlay = document.getElementById('fever-overlay');
+    const canvas = document.getElementById('fever-canvas');
+    if (!overlay || !canvas) return;
+    const ctx = canvas.getContext('2d');
+    const mainText = document.getElementById('fever-main-text');
+    const subText = document.getElementById('fever-sub-text');
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    if (isDouble) {
+      mainText.className = 'fever-main-text double';
+      mainText.textContent = 'W-FEVER!!';
+      subText.textContent = '✨✨ DOUBLE FEVER ✨✨';
+    } else {
+      mainText.className = 'fever-main-text';
+      mainText.textContent = 'FEVER!';
+      subText.textContent = '🎰 FEVER START 🎰';
+    }
+
+    overlay.classList.add('show');
+    if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 200]);
+
+    let particles = [];
+
+    function feverLaunch() {
+      const cx = canvas.width / 2 + (Math.random() - 0.5) * canvas.width * 0.8;
+      const cy = canvas.height / 2 + (Math.random() - 0.5) * canvas.height * 0.6;
+      const cols = isDouble
+        ? ['#ffffff', '#ffd700', '#ffec5c', '#fffde7']
+        : ['#ff2d55', '#ffd700', '#ff9800', '#ff00aa', '#ffffff', '#00e5ff'];
+      const color = cols[Math.floor(Math.random() * cols.length)];
+      const count = 60 + Math.floor(Math.random() * 40);
+      for (let i = 0; i < count; i++) {
+        const angle = (Math.PI * 2 / count) * i;
+        const speed = 3 + Math.random() * 6;
+        particles.push({
+          x: cx, y: cy,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          alpha: 1, color,
+          r: 2 + Math.random() * 3,
+          decay: 0.015 + Math.random() * 0.01,
+        });
+      }
+    }
+
+    function feverAnim() {
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      particles = particles.filter((p) => p.alpha > 0.02);
+      particles.forEach((p) => {
+        ctx.globalAlpha = p.alpha;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        p.x += p.vx; p.y += p.vy;
+        p.vy += 0.08;
+        p.vx *= 0.97;
+        p.alpha -= p.decay;
+      });
+      feverAnimId = requestAnimationFrame(feverAnim);
+    }
+
+    // 既存タイマーが残っていれば clear（連続発動への保険）
+    if (feverLaunchInterval) clearInterval(feverLaunchInterval);
+    if (feverAnimId) cancelAnimationFrame(feverAnimId);
+
+    feverLaunch(); feverLaunch(); feverLaunch();
+    feverLaunchInterval = setInterval(feverLaunch, 250);
+    feverAnim();
+
+    setTimeout(() => {
+      clearInterval(feverLaunchInterval);
+      cancelAnimationFrame(feverAnimId);
+      feverLaunchInterval = null;
+      feverAnimId = null;
+      overlay.classList.remove('show');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }, 3000);
+  }
+
+  // ------------------------------------------------------------
+  // チップ移動アニメ（仕様書 13. チップ移動アニメーション）
+  //   敗者の行から勝者の行へチップが放物線軌道で飛ぶ。
+  //   着弾時に金色の爆発エフェクト＋星型の火花。
+  //   1.5秒の演出のあと勝者の行が金色に脈動。
+  // ------------------------------------------------------------
+  function animateChipMovesInOverlay(payload) {
+    if (!payload.chipMoves) return;
+    const overlay = document.getElementById('agari-overlay');
+    if (!overlay) return;
+    // .chip-row 要素を集める。winner = positive, losers = negative
+    const rows = overlay.querySelectorAll('.chip-row');
+    if (rows.length === 0) return;
+
+    // playerId → row 要素のマップを作る（row 内のテキストから推定）
+    const playerRowMap = new Map();
+    const playersById = new Map(view.publicState.players.map((p) => [p.id, p]));
+    rows.forEach((row) => {
+      const nameEl = row.querySelector('.point-name');
+      if (!nameEl) return;
+      const text = nameEl.textContent.trim();
+      for (const [pid, p] of playersById) {
+        if (p.name === text) {
+          playerRowMap.set(pid, row);
+          break;
+        }
+      }
+    });
+
+    // 勝者の playerId を payload.winner から特定
+    const winnerId = payload.winner && payload.winner.id;
+    const winnerRow = playerRowMap.get(winnerId);
+    if (!winnerRow) return;
+
+    // 各敗者から勝者へチップを飛ばす
+    const losers = [];
+    for (const pid of ['P0', 'P1', 'P2']) {
+      if (pid === winnerId) continue;
+      const delta = payload.chipMoves[pid] || 0;
+      if (delta < 0) {
+        const fromRow = playerRowMap.get(pid);
+        if (fromRow) losers.push({ pid, count: -delta, fromRow });
+      }
+    }
+
+    losers.forEach((loser, idx) => {
+      const playerIdx = parseInt(loser.pid.slice(1), 10);
+      // 各敗者ごとに少しずらして発射
+      setTimeout(() => {
+        animateChipTransfer(loser.fromRow, winnerRow, loser.count, playerIdx);
+      }, idx * 300);
+    });
+  }
+
+  // 1組（敗者→勝者）のチップ飛行アニメ
+  function animateChipTransfer(fromEl, toEl, count, playerIdx) {
+    if (!fromEl || !toEl) return;
+    const fromRect = fromEl.getBoundingClientRect();
+    const toRect = toEl.getBoundingClientRect();
+    const colorMap = ['blue', 'green', 'orange'];
+    const color = colorMap[playerIdx] || 'blue';
+
+    const blackCount = Math.min(Math.floor(count / 10), 8);
+    const colorCount = Math.min(count - blackCount * 10, 15);
+    const flyingChips = [];
+    for (let i = 0; i < blackCount; i++) flyingChips.push('black');
+    for (let i = 0; i < colorCount; i++) flyingChips.push(color);
+    while (flyingChips.length > 20) flyingChips.pop();
+    while (flyingChips.length < 6) flyingChips.push(color); // 最低6個
+
+    let lastArrivalDelay = 0;
+
+    flyingChips.forEach((chipColor, idx) => {
+      const chip = document.createElement('div');
+      chip.className = `chip-flying ${chipColor}`;
+      const startX = fromRect.left + fromRect.width * (0.3 + Math.random() * 0.5);
+      const startY = fromRect.top + fromRect.height / 2 + (Math.random() - 0.5) * 16;
+      const endX = toRect.left + toRect.width * (0.3 + Math.random() * 0.5);
+      const endY = toRect.top + toRect.height / 2 + (Math.random() - 0.5) * 16;
+      const midX = (startX + endX) / 2 + (Math.random() - 0.5) * 60;
+      const midY = Math.min(startY, endY) - 120 - Math.random() * 60;
+
+      chip.style.left = startX + 'px';
+      chip.style.top = startY + 'px';
+      chip.style.opacity = '0';
+      chip.style.transform = 'translate(-50%, -50%) scale(0.3) rotate(0deg)';
+      chip.style.transition = 'none';
+      document.body.appendChild(chip);
+
+      const launchDelay = idx * 60;
+      const arcUpTime = 500;
+      const arcDownTime = 600;
+
+      setTimeout(() => {
+        chip.style.opacity = '1';
+        chip.style.transition = `left ${arcUpTime}ms cubic-bezier(0.2, 0.6, 0.4, 1), top ${arcUpTime}ms cubic-bezier(0.2, 0.8, 0.6, 1), transform ${arcUpTime}ms ease-out`;
+        chip.style.left = midX + 'px';
+        chip.style.top = midY + 'px';
+        chip.style.transform = `translate(-50%, -50%) scale(1.5) rotate(${360 + Math.random() * 360}deg)`;
+      }, launchDelay);
+
+      setTimeout(() => {
+        chip.style.transition = `left ${arcDownTime}ms cubic-bezier(0.6, 0, 0.8, 0.4), top ${arcDownTime}ms cubic-bezier(0.4, 0.2, 0.8, 0.6), transform ${arcDownTime}ms ease-in`;
+        chip.style.left = endX + 'px';
+        chip.style.top = endY + 'px';
+        chip.style.transform = `translate(-50%, -50%) scale(1.8) rotate(${720 + Math.random() * 720}deg)`;
+      }, launchDelay + arcUpTime);
+
+      // 飛行中の光の尾
+      setTimeout(() => {
+        const trailInterval = setInterval(() => {
+          const rect = chip.getBoundingClientRect();
+          if (rect.left === 0 && rect.top === 0) return;
+          const trail = document.createElement('div');
+          trail.className = 'chip-trail';
+          trail.style.left = (rect.left + rect.width / 2) + 'px';
+          trail.style.top = (rect.top + rect.height / 2) + 'px';
+          trail.style.color = window.getComputedStyle(chip).color;
+          document.body.appendChild(trail);
+          setTimeout(() => trail.remove(), 500);
+        }, 40);
+        setTimeout(() => clearInterval(trailInterval), arcUpTime + arcDownTime - 100);
+      }, launchDelay);
+
+      // 着弾時の爆発エフェクト
+      const arrivalTime = launchDelay + arcUpTime + arcDownTime;
+      setTimeout(() => {
+        const rect = chip.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+
+        const impact = document.createElement('div');
+        impact.className = 'chip-impact';
+        impact.style.left = cx + 'px';
+        impact.style.top = cy + 'px';
+        document.body.appendChild(impact);
+        setTimeout(() => impact.remove(), 600);
+
+        // 8本の星型火花
+        for (let s = 0; s < 8; s++) {
+          const spark = document.createElement('div');
+          const angle = (Math.PI * 2 / 8) * s;
+          const dist = 30 + Math.random() * 20;
+          const sx = Math.cos(angle) * dist;
+          const sy = Math.sin(angle) * dist;
+          spark.style.cssText = `
+            position: fixed;
+            left: ${cx}px; top: ${cy}px;
+            width: 5px; height: 5px;
+            background: #ffd700;
+            border-radius: 50%;
+            box-shadow: 0 0 6px #ffd700, 0 0 12px #ff8800;
+            z-index: 602;
+            pointer-events: none;
+            transform: translate(-50%, -50%);
+            transition: transform 0.5s ease-out, opacity 0.5s ease-out;
+          `;
+          document.body.appendChild(spark);
+          setTimeout(() => {
+            spark.style.transform = `translate(calc(-50% + ${sx}px), calc(-50% + ${sy}px)) scale(0.3)`;
+            spark.style.opacity = '0';
+          }, 10);
+          setTimeout(() => spark.remove(), 600);
+        }
+
+        chip.style.transition = 'opacity 0.3s, transform 0.3s';
+        chip.style.opacity = '0';
+        chip.style.transform += ' scale(0.3)';
+      }, arrivalTime);
+
+      setTimeout(() => chip.remove(), arrivalTime + 500);
+      lastArrivalDelay = Math.max(lastArrivalDelay, arrivalTime);
+    });
+
+    // 全チップ到着後、勝者の行が金色に光る
+    setTimeout(() => {
+      toEl.classList.add('winner-receive-flash');
+      setTimeout(() => toEl.classList.remove('winner-receive-flash'), 1800);
+    }, lastArrivalDelay - 200);
+
+    if (navigator.vibrate) {
+      navigator.vibrate([30, 80, 50, 80, 80, 80, 100]);
+    }
+  }
+
+  // ------------------------------------------------------------
+  // ロン時の振り込み牌の赤点滅
+  //   振り込み者の河の DOM 上で、当該牌（基本牌コード一致）に
+  //   .loser-discard-flash クラスを付ける。
+  //   左右のどちらの対戦相手かを seatLayout で特定し対象の DOM を選ぶ。
+  // ------------------------------------------------------------
+  function flashLoserDiscard(fromPlayerId, winningTile) {
+    if (!view.publicState) return;
+    // 自分が振り込んだか、他家か
+    const myPlayerId = fm.state.playerId;
+    const layout = seatLayout(view.publicState, myPlayerId);
+    let containerEl = null;
+    if (fromPlayerId === layout.me.id) {
+      containerEl = document.getElementById('me-discards');
+    } else if (fromPlayerId === layout.leftOpp.id) {
+      containerEl = document.querySelector('#opp-left [data-role="discards"]');
+    } else if (fromPlayerId === layout.rightOpp.id) {
+      containerEl = document.querySelector('#opp-right [data-role="discards"]');
+    }
+    if (!containerEl) return;
+    // 河の最後の牌（= 振り込み牌）を点滅
+    const tiles = containerEl.querySelectorAll('.tile');
+    if (tiles.length === 0) return;
+    const lastTile = tiles[tiles.length - 1];
+    lastTile.classList.add('loser-discard-flash');
+    setTimeout(() => {
+      lastTile.classList.remove('loser-discard-flash');
+    }, 1500);
   }
 
   // オリジナル FEVER 老師キャラ SVG（旧 play.html から）

@@ -1198,6 +1198,176 @@
   }
 
   /* ============================
+     FEVER 花火オーバーレイ（仕様書 7. FEVER視覚演出）
+     ============================ */
+  #fever-overlay {
+    position: fixed; inset: 0;
+    display: none;
+    z-index: 300;
+    pointer-events: none;
+  }
+  #fever-overlay.show { display: block; }
+  #fever-canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+  }
+  #fever-overlay::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: repeating-conic-gradient(from 0deg,
+      rgba(255, 45, 85, 0.15), rgba(255, 215, 0, 0.15) 30deg,
+      rgba(255, 0, 170, 0.15) 60deg, rgba(255, 45, 85, 0.15) 90deg);
+    animation: fever-spin 2s linear infinite, fever-strobe 0.1s linear infinite;
+    opacity: 0.95;
+  }
+  @keyframes fever-spin {
+    from { transform: rotate(0); }
+    to   { transform: rotate(360deg); }
+  }
+  @keyframes fever-strobe {
+    0%, 100% { opacity: 0.7; }
+    50%      { opacity: 0.95; }
+  }
+  .fever-main-text {
+    position: absolute;
+    top: 35%; left: 50%;
+    transform: translate(-50%, -50%) rotate(-8deg);
+    font-family: 'Bungee', 'Yu Gothic', sans-serif;
+    font-size: 100px;
+    font-weight: 900;
+    letter-spacing: 8px;
+    color: #ffd700;
+    text-shadow:
+      -3px -3px 0 #c5002a, 3px -3px 0 #c5002a,
+      -3px 3px 0 #c5002a, 3px 3px 0 #c5002a,
+      0 0 30px #ff2d55, 0 0 60px rgba(255,215,0,1);
+    animation: fever-text-bounce 0.3s infinite, fever-text-jiggle 0.05s infinite;
+    z-index: 10;
+  }
+  .fever-main-text.double {
+    font-size: 80px;
+    background: linear-gradient(45deg, #ff2d55, #ffd700, #ff00aa, #00e5ff, #ffd700);
+    background-size: 200% 200%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: fever-text-bounce 0.3s infinite, rainbow-shift 0.5s linear infinite;
+  }
+  @keyframes fever-text-bounce {
+    0%, 100% { transform: translate(-50%, -50%) rotate(-8deg) scale(1); }
+    50%      { transform: translate(-50%, -50%) rotate(-8deg) scale(1.15); }
+  }
+  @keyframes fever-text-jiggle {
+    0%, 100% { letter-spacing: 8px; }
+    50%      { letter-spacing: 12px; }
+  }
+  @keyframes rainbow-shift {
+    from { background-position: 0% 0%; }
+    to   { background-position: 200% 200%; }
+  }
+  .fever-sub-text {
+    position: absolute;
+    bottom: 25%; left: 50%;
+    transform: translateX(-50%);
+    font-family: 'DotGothic16', monospace;
+    font-size: 22px;
+    color: white;
+    letter-spacing: 6px;
+    text-shadow: 0 0 12px rgba(255,215,0,1), 2px 2px 0 rgba(0,0,0,0.8);
+    z-index: 10;
+    animation: fever-sub-pop 0.4s ease-out 0.3s both;
+  }
+  @keyframes fever-sub-pop {
+    from { opacity: 0; transform: translateX(-50%) scale(0.5); }
+    to   { opacity: 1; transform: translateX(-50%) scale(1); }
+  }
+
+  /* ============================
+     チップ移動アニメ（仕様書 13. チップ移動アニメーション）
+     ============================ */
+  .chip-flying {
+    position: fixed;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    z-index: 600;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 8px currentColor, 0 0 16px currentColor;
+    border: 2px solid rgba(255,255,255,0.8);
+  }
+  .chip-flying.black {
+    background: radial-gradient(ellipse at center, #4a4a4a 0%, #1a1a1a 70%, #000 100%);
+    color: #ffd700;
+  }
+  .chip-flying.blue {
+    background: radial-gradient(ellipse at center, #5599ff 0%, #1565c0 60%, #0d47a1 100%);
+    color: #5599ff;
+  }
+  .chip-flying.green {
+    background: radial-gradient(ellipse at center, #66bb6a 0%, #1a5d2c 60%, #0d3818 100%);
+    color: #66bb6a;
+  }
+  .chip-flying.orange {
+    background: radial-gradient(ellipse at center, #ffa040 0%, #e67300 60%, #b35400 100%);
+    color: #ffa040;
+  }
+  .chip-trail {
+    position: fixed;
+    width: 6px; height: 6px;
+    background: currentColor;
+    border-radius: 50%;
+    z-index: 599;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 6px currentColor;
+    opacity: 0.6;
+    animation: chip-trail-fade 0.5s ease-out forwards;
+  }
+  @keyframes chip-trail-fade {
+    from { opacity: 0.7; transform: translate(-50%, -50%) scale(1); }
+    to   { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
+  }
+  .chip-impact {
+    position: fixed;
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    z-index: 601;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle, rgba(255,215,0,1), rgba(255,140,0,0.7) 40%, transparent 70%);
+    animation: chip-impact-flash 0.6s ease-out forwards;
+  }
+  @keyframes chip-impact-flash {
+    0%   { transform: translate(-50%, -50%) scale(0.3); opacity: 1; }
+    40%  { transform: translate(-50%, -50%) scale(1.5); opacity: 1; }
+    100% { transform: translate(-50%, -50%) scale(2.5); opacity: 0; }
+  }
+  /* 勝者の行が金色に光るパルス */
+  .winner-receive-flash {
+    animation: winner-flash 1.8s ease-out;
+  }
+  @keyframes winner-flash {
+    0%, 100% { background: rgba(255,215,0,0.08); box-shadow: none; }
+    20%, 60% { background: rgba(255,215,0,0.35); box-shadow: 0 0 20px rgba(255,215,0,0.6); }
+  }
+
+  /* 振り込み牌の赤点滅 */
+  .tile.loser-discard-flash {
+    animation: loser-flash 1.5s ease-out forwards;
+    outline: 3px solid #ff2d55 !important;
+    outline-offset: 2px;
+    z-index: 5;
+    position: relative;
+  }
+  @keyframes loser-flash {
+    0%   { box-shadow: 0 0 0 rgba(255,45,85,0); transform: scale(1); }
+    20%  { box-shadow: 0 0 30px rgba(255,45,85,1), 0 0 60px rgba(255,45,85,0.6); transform: scale(1.3); }
+    40%  { box-shadow: 0 0 15px rgba(255,45,85,0.8); transform: scale(1.1); }
+    60%  { box-shadow: 0 0 30px rgba(255,45,85,1); transform: scale(1.2); }
+    100% { box-shadow: 0 0 10px rgba(255,45,85,0.5); transform: scale(1.05); }
+  }
+
+  /* ============================
      残り山牌の警告（仕様書 13. 残り山牌の警告表示）
      ============================ */
   .wall-label.warn strong {
@@ -1427,6 +1597,13 @@
   <!-- カットイン・アクションスプラッシュ用オーバーレイ（フェーズ5a） -->
   <div id="cutin-overlay"></div>
   <div id="action-splash"></div>
+
+  <!-- FEVER 花火オーバーレイ（フェーズ5b） -->
+  <div id="fever-overlay">
+    <canvas id="fever-canvas"></canvas>
+    <div id="fever-main-text" class="fever-main-text">FEVER!</div>
+    <div id="fever-sub-text" class="fever-sub-text">🎰 FEVER START 🎰</div>
+  </div>
 
 </div>
 
