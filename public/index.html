@@ -483,8 +483,12 @@
     margin-left: 6px;
   }
 
-  /* 流局オーバーレイ */
-  .ryukyoku-overlay {
+  /* アクションボタン: ツモ・ロン追加 */
+  .action-btn.tsumo { background: linear-gradient(135deg, #00e5ff, #00aacc); color: #001a1f; }
+  .action-btn.ron   { background: linear-gradient(135deg, #ff2d55, #c5002a); color: #fff; }
+
+  /* 結果オーバーレイ共通（流局・アガリ・対局終了） */
+  .result-overlay {
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.85);
@@ -492,29 +496,220 @@
     align-items: center;
     justify-content: center;
     z-index: 200;
+    overflow-y: auto;
+    padding: 16px;
   }
-  .ryukyoku-overlay.show {
+  .result-overlay.show {
     display: flex;
     animation: fade-in 0.4s ease-out;
   }
-  .ryukyoku-card {
+  .result-card {
     background: linear-gradient(180deg, #1a0033, #000);
     border: 2px solid #ffd700;
     border-radius: 16px;
-    padding: 32px 28px;
+    padding: 24px 20px;
     text-align: center;
-    max-width: 320px;
+    max-width: 380px;
+    width: 100%;
     box-shadow: 0 0 24px rgba(255,215,0,0.5);
+    color: white;
+    max-height: 90vh;
+    overflow-y: auto;
   }
-  .ryukyoku-card h2 {
+  .result-card h2 {
     color: #ffd700;
     font-size: 28px;
-    margin-bottom: 12px;
+    margin-bottom: 8px;
   }
-  .ryukyoku-card p {
+  .result-sub {
+    color: rgba(255,255,255,0.75);
+    font-size: 13px;
+    margin-bottom: 14px;
+  }
+  .primary-next {
+    background: linear-gradient(135deg, #ffd700, #c9a000);
+    color: #1a1a1a;
+    font-weight: bold;
+    margin-top: 20px;
+    padding: 14px 24px;
+    font-size: 15px;
+    width: 100%;
+  }
+
+  /* 流局カード */
+  .tenpai-list {
+    margin: 16px 0;
+    text-align: left;
+  }
+  .tenpai-row {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 8px;
+    padding: 8px 12px;
+    margin-bottom: 6px;
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+  }
+  .tenpai-name { font-weight: bold; }
+  .tenpai-status { font-size: 11px; color: rgba(255,255,255,0.6); }
+  .tenpai-delta { font-family: monospace; font-size: 14px; }
+  .tenpai-delta.plus  { color: #00e5ff; }
+  .tenpai-delta.minus { color: #ff8a9b; }
+  .tenpai-waits {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 4px;
+    font-size: 10px;
+    color: rgba(255,255,255,0.6);
+    flex-wrap: wrap;
+  }
+
+  /* アガリカード */
+  .agari-banner {
+    font-size: 32px !important;
+    background: linear-gradient(45deg, #ff2d55, #ffd700, #ff00aa);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent !important;
+    margin-bottom: 12px !important;
+  }
+  .agari-winner {
+    font-size: 15px;
     color: rgba(255,255,255,0.85);
+    margin-bottom: 14px;
+  }
+  .agari-hand {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    justify-content: center;
+    margin: 12px 0;
+    padding: 12px 8px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 8px;
+    border: 1px solid rgba(255,215,0,0.2);
+  }
+  .agari-melds { display: contents; }
+  .agari-meld {
+    display: inline-flex;
+    gap: 1px;
+    padding: 0 4px;
+    border-right: 1px solid rgba(255,255,255,0.1);
+  }
+  .agari-winning {
+    animation: winning-glow 1s ease-in-out infinite alternate;
+    border-color: #ffd700 !important;
+    background: linear-gradient(180deg, #fffde7, #fff9c4) !important;
+  }
+  @keyframes winning-glow {
+    from { box-shadow: 0 0 4px rgba(255,215,0,0.5); }
+    to   { box-shadow: 0 0 12px rgba(255,215,0,1); }
+  }
+
+  .agari-yaku {
+    text-align: left;
+    background: rgba(0,0,0,0.3);
+    border: 1px solid rgba(255,215,0,0.3);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin: 12px 0;
+  }
+  .yaku-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 3px 0;
+    font-size: 13px;
+    border-bottom: 1px dotted rgba(255,255,255,0.1);
+  }
+  .yaku-row:last-child { border-bottom: none; }
+  .yaku-name { color: rgba(255,255,255,0.85); }
+  .yaku-han { color: #ffd700; font-family: monospace; }
+  .yaku-total {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 2px solid #ffd700;
+    text-align: center;
     font-size: 14px;
   }
+  .yaku-total strong { color: #ffd700; font-size: 16px; }
+
+  .agari-points {
+    text-align: left;
+    background: rgba(255,215,0,0.08);
+    border: 1px solid rgba(255,215,0,0.3);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-top: 12px;
+  }
+  .points-title {
+    font-size: 12px;
+    color: #ffd700;
+    margin-bottom: 6px;
+    text-align: center;
+  }
+  .point-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 3px 0;
+    font-size: 13px;
+  }
+  .point-row.reach-bonus {
+    border-top: 1px dotted rgba(255,255,255,0.2);
+    margin-top: 4px;
+    padding-top: 6px;
+    font-size: 12px;
+    color: rgba(255,255,255,0.6);
+  }
+  .point-name { color: rgba(255,255,255,0.85); }
+  .point-delta { font-family: monospace; font-size: 14px; }
+  .point-delta.plus  { color: #00e5ff; }
+  .point-delta.minus { color: #ff8a9b; }
+
+  .agari-ura {
+    margin-top: 10px;
+    padding: 8px;
+    background: rgba(255,0,170,0.08);
+    border: 1px solid rgba(255,0,170,0.3);
+    border-radius: 8px;
+  }
+  .ura-title {
+    font-size: 11px;
+    color: #ff00aa;
+    margin-bottom: 4px;
+  }
+
+  /* 対局終了カード */
+  .gameend-card { max-width: 360px; }
+  .ranking {
+    margin: 14px 0;
+    text-align: left;
+  }
+  .rank-row {
+    display: grid;
+    grid-template-columns: 50px 1fr auto;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    margin-bottom: 6px;
+  }
+  .rank-row:first-child {
+    background: linear-gradient(90deg, rgba(255,215,0,0.2), rgba(255,215,0,0.05));
+    border-color: #ffd700;
+  }
+  .rank-num { color: #ffd700; font-weight: bold; font-family: monospace; }
+  .rank-name { font-weight: bold; }
+  .rank-score { font-family: monospace; color: #00e5ff; }
+
+  /* 旧 ryukyoku-overlay クラスは互換のため残す */
+  .ryukyoku-overlay { display: none; }
 
   /* ターン表示 */
   .turn-bar {

@@ -32,6 +32,97 @@ function calculateSimpleScore(han, isParent, isTsumo) {
   return Math.ceil(total / 100) * 100;
 }
 
+// ============================================================
+// アガリ時の点棒移動を計算（フェーズ4b step 3 で追加）
+//   入力:
+//     han        : 翻数
+//     dealerId   : 親（東家）の playerId
+//     winnerId   : 和了者の playerId
+//     isTsumo    : ツモなら true、ロンなら false
+//     fromPlayer : ロン時の振り込み者（ロンのみ必須）
+//     warePlayer : 割れ目プレイヤー (P0|P1|P2)。和了者または被ロン者が
+//                  割れ目なら点棒移動 ×2（仕様書「4. 割れ目効果」）
+//   戻り値:
+//     { moves: {P0, P1, P2 のいずれもプラマイ点数}, basePoint, total }
+// ============================================================
+function calculatePointMoves({ han, dealerId, winnerId, isTsumo, fromPlayer = null, warePlayer = null }) {
+  const isWinnerParent = (winnerId === dealerId);
+  const allPlayers = ['P0', 'P1', 'P2'];
+  const moves = { P0: 0, P1: 0, P2: 0 };
+
+  // 基本点（30 符固定・calculateSimpleScore と同じロジック）
+  let basePoint;
+  if (han >= 13) basePoint = 8000;
+  else if (han >= 11) basePoint = 6000;
+  else if (han >= 8)  basePoint = 4000;
+  else if (han >= 6)  basePoint = 3000;
+  else if (han >= 5)  basePoint = 2000;
+  else basePoint = Math.min(30 * Math.pow(2, han + 2), 2000);
+
+  const round100 = (n) => Math.ceil(n / 100) * 100;
+
+  if (isTsumo) {
+    if (isWinnerParent) {
+      // 親ツモ: 子全員から basePoint × 2 ずつ
+      for (const pid of allPlayers) {
+        if (pid === winnerId) continue;
+        let pay = round100(basePoint * 2);
+        // 割れ目: 和了者または支払者が割れ目なら ×2
+        if (warePlayer === winnerId || warePlayer === pid) pay *= 2;
+        moves[pid] -= pay;
+        moves[winnerId] += pay;
+      }
+    } else {
+      // 子ツモ: 親から basePoint*2、他子から basePoint*1
+      for (const pid of allPlayers) {
+        if (pid === winnerId) continue;
+        const isParent = (pid === dealerId);
+        let pay = round100(basePoint * (isParent ? 2 : 1));
+        if (warePlayer === winnerId || warePlayer === pid) pay *= 2;
+        moves[pid] -= pay;
+        moves[winnerId] += pay;
+      }
+    }
+  } else {
+    // ロン: discarder が全額支払い
+    if (!fromPlayer) throw new Error('ロンには fromPlayer が必須');
+    let pay = round100(basePoint * (isWinnerParent ? 6 : 4));
+    if (warePlayer === winnerId || warePlayer === fromPlayer) pay *= 2;
+    moves[fromPlayer] -= pay;
+    moves[winnerId] += pay;
+  }
+
+  return { moves, basePoint, total: moves[winnerId] };
+}
+
+// ============================================================
+// 流局時のノーテン罰符を計算（仕様書「12. ノーテン罰符」より）
+//   合計 3000 点をノーテン者から徴収しテンパイ者で山分け
+//   全員テンパイ or 全員ノーテン → 移動なし
+//   1人テンパイ → +3000（1500×2 受け取り）
+//   2人テンパイ → 各 +1500
+// ============================================================
+function calculateNotenPenalty(tenpaiPlayerIds) {
+  const allPlayers = ['P0', 'P1', 'P2'];
+  const moves = { P0: 0, P1: 0, P2: 0 };
+  const tenpaiCount = tenpaiPlayerIds.length;
+  const notenPlayers = allPlayers.filter((p) => !tenpaiPlayerIds.includes(p));
+  const notenCount = notenPlayers.length;
+
+  if (tenpaiCount === 0 || notenCount === 0) return moves;
+
+  const TOTAL = 3000;
+  const perTenpai = Math.floor(TOTAL / tenpaiCount);
+  const perNoten = Math.floor(TOTAL / notenCount);
+
+  for (const p of tenpaiPlayerIds) moves[p] = perTenpai;
+  for (const p of notenPlayers) moves[p] = -perNoten;
+
+  return moves;
+}
+
 module.exports = {
   calculateSimpleScore,
+  calculatePointMoves,
+  calculateNotenPenalty,
 };

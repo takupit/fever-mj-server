@@ -761,6 +761,33 @@ class GameEngine {
     return candidates[0].tile;
   }
 
+  // ツモアガリ可能か（boolean）。自分のターン中で drawnTile があるときに使う。
+  // フェーズ4b step 3 で your-turn ペイロードに含めるために追加。
+  canTsumo(playerId) {
+    if (!this.state.drawnTile) return false;
+    const result = this.checkAgariTsumo(playerId, this.state.drawnTile);
+    return !!result;
+  }
+
+  // 流局時のテンパイ判定情報を全プレイヤー分返す
+  // 戻り値: [{ id, isTenpai, waits, hand, melds, kitaPullsCount }]
+  getRyukyokuTenpaiStatus() {
+    return this.state.players.map((p) => {
+      const isTenpaiNow = isTenpai(p.hand, p.melds);
+      return {
+        id: p.id,
+        name: p.name,
+        isTenpai: isTenpaiNow,
+        // リーチ者は確定テンパイ
+        isReached: !!p.isReached,
+        waits: isTenpaiNow ? getWaitingTiles(p.hand, p.melds) : [],
+        hand: isTenpaiNow ? [...p.hand] : [],
+        melds: p.melds.map((m) => ({ type: m.type, tiles: [...m.tiles], fromPlayer: m.fromPlayer || null })),
+        kitaPullsCount: p.kitaPulls.length,
+      };
+    });
+  }
+
   // リーチ可能か（boolean）。cpuCheckReach の薄いラッパー。
   // フェーズ4b step 2 で your-turn ペイロードに含めるために追加。
   canReach(playerId) {

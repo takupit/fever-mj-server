@@ -489,6 +489,44 @@ test('GameEngine.getReachOptions: テンパイになる打牌候補を全部返�
   }
 });
 
+// ------------------------------------------------------------
+// ツモアガリ判定（フェーズ4b step 3 で追加）
+// ------------------------------------------------------------
+test('GameEngine.canTsumo: ツモ牌なしなら false', () => {
+  const engine = new GameEngine();
+  engine.init();
+  // 配牌直後（ツモ前）
+  assert.strictEqual(engine.canTsumo('P0'), false);
+});
+
+test('GameEngine.canTsumo: アガリ形になるツモなら true', () => {
+  const engine = new GameEngine();
+  engine.init();
+  const p0 = engine.state.players[0];
+  // 13枚で「あと p2 でアガリ」の手にする
+  p0.hand = ['m2','m3','m4','m2','m3','m4','p2','p3','p4','p3','p4','m9','m9'];
+  // リーチ済にして純粋に役（立直）でアガれるようにする
+  p0.isReached = true;
+  p0.ipatsuActive = false;
+  engine.state.drawnTile = 'p2';
+  p0.hand.push('p2');
+  assert.strictEqual(engine.canTsumo('P0'), true);
+});
+
+test('GameEngine.getRyukyokuTenpaiStatus: 各プレイヤーのテンパイ状況を返す', () => {
+  const engine = new GameEngine();
+  engine.init();
+  // P0 をテンパイ手に、P1, P2 はそのまま
+  const p0 = engine.state.players[0];
+  p0.hand = ['m2','m3','m4','m2','m3','m4','p2','p3','p4','p2','p3','p4','m9'];
+
+  const status = engine.getRyukyokuTenpaiStatus();
+  assert.strictEqual(status.length, 3);
+  const p0Status = status.find((s) => s.id === 'P0');
+  assert.strictEqual(p0Status.isTenpai, true);
+  assert.ok(p0Status.waits.length > 0);
+});
+
 test('GameEngine.nextTurn: P0 → P1 → P2 → P0 のローテーション', () => {
   const engine = new GameEngine();
   engine.init();

@@ -102,7 +102,11 @@
       'game:your-turn',
       'game:waiting-claim',
       'game:action-result',
+      'game:agari',
       'game:ryukyoku',
+      'game:hand-end',
+      'game:game-end',
+      'game:tobi',
     ].forEach((evt) => {
       socket.on(evt, (payload) => {
         // 部屋情報を受け取ったらクライアント側状態を更新
@@ -151,6 +155,18 @@
     if (!state.socket) return;
     state.socket.emit('game:skip', {});
   }
+  function sendTsumo() {
+    if (!state.socket) return;
+    state.socket.emit('game:tsumo', {});
+  }
+  function sendRon() {
+    if (!state.socket) return;
+    state.socket.emit('game:ron', {});
+  }
+  function sendNextHand() {
+    if (!state.socket) return;
+    state.socket.emit('game:next-hand', {});
+  }
 
   // 他のスクリプトから使える API を window に公開
   window.feverMj = {
@@ -165,6 +181,9 @@
     sendKan,
     sendReach,
     sendSkip,
+    sendTsumo,
+    sendRon,
+    sendNextHand,
     clearSession,
     loadSession,
   };

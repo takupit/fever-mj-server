@@ -83,7 +83,65 @@ function privateHandView(state, playerId) {
   };
 }
 
+// ============================================================
+// アガリ画面用のビューを生成（フェーズ4b step 3 で追加）
+//   agariResult: engine.checkAgariTsumo / checkAgariRon の戻り値
+//   winnerId: 和了者の playerId
+//   isTsumo: ツモなら true
+//   fromPlayer: ロン時の振り込み者
+//   pointResult: calculatePointMoves の戻り値
+//   reachBonusGain: リーチ棒を回収した分（和了者のみ +1000×棒数）
+// ============================================================
+function agariView(state, agariResult, winnerId, isTsumo, fromPlayer, pointResult, reachBonusGain) {
+  const winner = state.players.find((p) => p.id === winnerId);
+  const winningTile = isTsumo ? state.drawnTile : (state.lastDiscard ? state.lastDiscard.tile : null);
+  return {
+    winner: { id: winnerId, name: winner.name, wind: winner.wind },
+    isTsumo,
+    fromPlayer: fromPlayer
+      ? { id: fromPlayer, name: state.players.find((p) => p.id === fromPlayer).name }
+      : null,
+    hand: [...winner.hand],
+    melds: winner.melds.map((m) => ({ type: m.type, tiles: [...m.tiles], fromPlayer: m.fromPlayer || null })),
+    kitaPullsCount: winner.kitaPulls.length,
+    winningTile,
+    yakuList: agariResult.yakuResult.yakuList.map((y) => ({ name: y.name, han: y.han })),
+    totalHan: agariResult.yakuResult.totalHan,
+    isYakuman: !!agariResult.yakuResult.isYakuman,
+    yakumanCount: agariResult.yakuResult.yakumanCount || 0,
+    waitType: agariResult.waitType,
+    isHakuJoker: !!agariResult.isHakuJoker,
+    doraIndicators: [...state.doraIndicators],
+    // リーチ和了時のみ裏ドラ公開
+    uraDoraIndicators: winner.isReached ? [...state.uraDoraIndicators] : [],
+    basePoint: pointResult.basePoint,
+    pointMoves: pointResult.moves,
+    reachBonusGain: reachBonusGain || 0,
+    scoresAfter: state.players.reduce((acc, p) => { acc[p.id] = p.score; return acc; }, {}),
+    round: { wind: state.roundWind, hand: state.hand, honba: state.honba },
+  };
+}
+
+// ============================================================
+// 流局画面用のビューを生成（フェーズ4b step 3 で追加）
+//   tenpaiStatus: engine.getRyukyokuTenpaiStatus() の戻り値
+//   penaltyMoves: calculateNotenPenalty の戻り値
+// ============================================================
+function ryukyokuView(state, tenpaiStatus, penaltyMoves) {
+  return {
+    reason: 'wall-empty',
+    message: '流局しました（山切れ）',
+    tenpaiStatus,
+    penalty: penaltyMoves,
+    scoresAfter: state.players.reduce((acc, p) => { acc[p.id] = p.score; return acc; }, {}),
+    round: { wind: state.roundWind, hand: state.hand, honba: state.honba },
+    reachSticks: state.reachSticks,
+  };
+}
+
 module.exports = {
   publicGameView,
   privateHandView,
+  agariView,
+  ryukyokuView,
 };

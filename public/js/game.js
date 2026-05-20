@@ -302,6 +302,20 @@
     const row = document.createElement('div');
     row.className = 'action-row';
 
+    // ツモアガリボタン（最も目立たせる）
+    if (opts.options && opts.options.includes('tsumo')) {
+      const btn = document.createElement('button');
+      btn.className = 'action-btn tsumo';
+      btn.textContent = '🔵 ツモ！';
+      btn.addEventListener('click', () => {
+        if (confirm('ツモアガリしますか？')) {
+          view.discarding = true;
+          fm.sendTsumo();
+        }
+      });
+      row.appendChild(btn);
+    }
+
     // リーチボタン
     if (opts.options && opts.options.includes('reach')) {
       const btn = document.createElement('button');
@@ -374,6 +388,19 @@
     row.className = 'action-row';
     row.style.cssText = 'justify-content: center; margin-top: 8px;';
 
+    // ロンボタン（最優先で先頭に）
+    if (claim.options.includes('ron')) {
+      const btn = document.createElement('button');
+      btn.className = 'action-btn ron';
+      btn.textContent = '🔴 ロン！';
+      btn.addEventListener('click', () => {
+        view.pendingClaim = null;
+        stopClaimCountdown();
+        rerender();
+        fm.sendRon();
+      });
+      row.appendChild(btn);
+    }
     if (claim.options.includes('pon')) {
       const btn = document.createElement('button');
       btn.className = 'action-btn pon';
@@ -501,12 +528,46 @@
       }
     });
 
-    // 流局通知（step 1 は山切れの仮表示のみ）
-    fm.on('game:ryukyoku', ({ reason, message }) => {
+    // 流局通知（step 3: 詳細版）
+    fm.on('game:ryukyoku', (payload) => {
       view.canDiscard = false;
       view.discarding = false;
-      showRyukyokuOverlay(message || '流局しました');
+      view.myTurnOptions = null;
+      view.reachMode = false;
+      view.pendingClaim = null;
+      stopClaimCountdown();
+      showRyukyokuOverlay(payload);
       rerender();
+    });
+
+    // アガリ通知（step 3）
+    fm.on('game:agari', (payload) => {
+      view.canDiscard = false;
+      view.discarding = false;
+      view.myTurnOptions = null;
+      view.reachMode = false;
+      view.pendingClaim = null;
+      stopClaimCountdown();
+      showAgariOverlay(payload);
+      rerender();
+    });
+
+    // 局終了 → 次局開始の通知（情報のみ・オーバーレイは hide される）
+    fm.on('game:hand-end', () => {
+      hideAgariOverlay();
+      hideRyukyokuOverlay();
+    });
+
+    // 対局終了
+    fm.on('game:game-end', (payload) => {
+      view.canDiscard = false;
+      view.discarding = false;
+      view.myTurnOptions = null;
+      view.pendingClaim = null;
+      stopClaimCountdown();
+      hideAgariOverlay();
+      hideRyukyokuOverlay();
+      showGameEndOverlay(payload);
     });
 
     // 接続切れたら表示をクリア（再接続時に古い手牌が見えないように）
@@ -529,25 +590,250 @@
     setTimeout(() => { el.className = 'toast'; }, duration);
   }
 
-  // 流局オーバーレイ
-  function showRyukyokuOverlay(message) {
+  // 流局オーバーレイ（step 3: 詳細版）
+  // payload: { reason, message, tenpaiStatus, penalty, scoresAfter, round, reachSticks }
+  function showRyukyokuOverlay(payload) {
     let el = document.getElementById('ryukyoku-overlay');
     if (!el) {
       el = document.createElement('div');
       el.id = 'ryukyoku-overlay';
-      el.className = 'ryukyoku-overlay';
-      el.innerHTML = `
-        <div class="ryukyoku-card">
-          <h2>🏁 流局</h2>
-          <p id="ryukyoku-message"></p>
-          <p class="hint" style="margin-top:12px;">
-            （次局への進行はフェーズ4d で実装します）
-          </p>
-        </div>
-      `;
+      el.className = 'result-overlay';
       document.body.appendChild(el);
     }
-    el.querySelector('#ryukyoku-message').textContent = message;
+    el.innerHTML = '';
+    const card = document.createElement('div');
+    card.className = 'result-card ryukyoku-card';
+
+    const h2 = document.createElement('h2');
+    h2.innerHTML = '🏁 流局';
+    card.appendChild(h2);
+    if (payload && payload.message) {
+      const msg = document.createElement('p');
+      msg.className = 'result-sub';
+      msg.textContent = payload.message;
+      card.appendChild(msg);
+    }
+
+    // テンパイ状況
+    if (payload && Array.isArray(payload.tenpaiStatus)) {
+      const list = document.createElement('div');
+      list.className = 'tenpai-list';
+      for (const s of payload.tenpaiStatus) {
+        const row = document.createElement('div');
+        row.className = 'tenpai-row';
+        const status = s.isTenpai || s.isReached ? '✅ テンパイ' : '❌ ノーテン';
+        const delta = (payload.penalty && payload.penalty[s.id]) || 0;
+        row.innerHTML = `
+          <span class="tenpai-name">${escapeHtml(s.name)}</span>
+          <span class="tenpai-status">${status}</span>
+          <span class="tenpai-delta ${delta >= 0 ? 'plus' : 'minus'}">${delta >= 0 ? '+' : ''}${delta}</span>
+        `;
+        // テンパイ者は待ち牌を表示
+        if (s.isTenpai && s.waits && s.waits.length > 0) {
+          const waits = document.createElement('div');
+          waits.className = 'tenpai-waits';
+          waits.appendChild(document.createTextNode('待ち: '));
+          for (const t of s.waits) {
+            waits.appendChild(makeTileEl(t, { small: true }));
+          }
+          row.appendChild(waits);
+        }
+        list.appendChild(row);
+      }
+      card.appendChild(list);
+    }
+
+    // 次局ボタン
+    const next = document.createElement('button');
+    next.className = 'action-btn primary-next';
+    next.textContent = '次の局へ ➡';
+    next.addEventListener('click', () => {
+      next.disabled = true;
+      fm.sendNextHand();
+    });
+    card.appendChild(next);
+
+    el.appendChild(card);
+    el.classList.add('show');
+  }
+  function hideRyukyokuOverlay() {
+    const el = document.getElementById('ryukyoku-overlay');
+    if (el) el.classList.remove('show');
+  }
+
+  // アガリオーバーレイ（step 3）
+  // payload: { winner, isTsumo, fromPlayer, hand, melds, kitaPullsCount, winningTile,
+  //            yakuList, totalHan, isYakuman, doraIndicators, uraDoraIndicators,
+  //            basePoint, pointMoves, scoresAfter, reachBonusGain, round }
+  function showAgariOverlay(payload) {
+    let el = document.getElementById('agari-overlay');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'agari-overlay';
+      el.className = 'result-overlay';
+      document.body.appendChild(el);
+    }
+    el.innerHTML = '';
+    const card = document.createElement('div');
+    card.className = 'result-card agari-card';
+
+    // バナー
+    const banner = document.createElement('h2');
+    banner.className = 'agari-banner';
+    banner.textContent = payload.isTsumo ? '🔵 ツモ！' : '🔴 ロン！';
+    if (payload.isYakuman) banner.textContent += ' 役満！';
+    card.appendChild(banner);
+
+    // 和了者
+    const winnerLine = document.createElement('div');
+    winnerLine.className = 'agari-winner';
+    const fromText = payload.isTsumo ? '' : `（${escapeHtml(payload.fromPlayer.name)} から）`;
+    winnerLine.innerHTML = `<strong>${escapeHtml(payload.winner.name)}</strong> ${fromText}`;
+    card.appendChild(winnerLine);
+
+    // 手牌＋和了牌
+    const handArea = document.createElement('div');
+    handArea.className = 'agari-hand';
+    // 副露
+    if (payload.melds && payload.melds.length > 0) {
+      const meldsBlock = document.createElement('div');
+      meldsBlock.className = 'agari-melds';
+      for (const m of payload.melds) {
+        const meldSpan = document.createElement('span');
+        meldSpan.className = 'agari-meld';
+        for (const t of m.tiles) meldSpan.appendChild(makeTileEl(t));
+        handArea.appendChild(meldSpan);
+      }
+    }
+    // 手牌
+    for (const t of payload.hand) {
+      handArea.appendChild(makeTileEl(t));
+    }
+    // 和了牌（強調）
+    if (payload.winningTile) {
+      const sep = document.createElement('span');
+      sep.style.cssText = 'width:8px; display:inline-block;';
+      handArea.appendChild(sep);
+      const winTile = makeTileEl(payload.winningTile);
+      winTile.classList.add('agari-winning');
+      handArea.appendChild(winTile);
+    }
+    card.appendChild(handArea);
+
+    // 役一覧
+    const yakuBlock = document.createElement('div');
+    yakuBlock.className = 'agari-yaku';
+    for (const y of payload.yakuList) {
+      const row = document.createElement('div');
+      row.className = 'yaku-row';
+      row.innerHTML = `
+        <span class="yaku-name">${escapeHtml(y.name)}</span>
+        <span class="yaku-han">${y.han}翻</span>
+      `;
+      yakuBlock.appendChild(row);
+    }
+    const total = document.createElement('div');
+    total.className = 'yaku-total';
+    total.innerHTML = `合計 <strong>${payload.totalHan}</strong> 翻 / 基本点 <strong>${payload.basePoint}</strong>`;
+    yakuBlock.appendChild(total);
+    card.appendChild(yakuBlock);
+
+    // 点棒移動
+    if (payload.pointMoves) {
+      const pointsBlock = document.createElement('div');
+      pointsBlock.className = 'agari-points';
+      pointsBlock.innerHTML = '<div class="points-title">点棒移動</div>';
+      for (const pid of ['P0','P1','P2']) {
+        const delta = payload.pointMoves[pid] || 0;
+        if (delta === 0) continue;
+        const name = (view.publicState && view.publicState.players.find((p) => p.id === pid)?.name) || pid;
+        const row = document.createElement('div');
+        row.className = 'point-row';
+        row.innerHTML = `
+          <span class="point-name">${escapeHtml(name)}</span>
+          <span class="point-delta ${delta >= 0 ? 'plus' : 'minus'}">${delta >= 0 ? '+' : ''}${delta}</span>
+        `;
+        pointsBlock.appendChild(row);
+      }
+      if (payload.reachBonusGain > 0) {
+        const row = document.createElement('div');
+        row.className = 'point-row reach-bonus';
+        row.innerHTML = `<span class="point-name">リーチ棒回収</span><span class="point-delta plus">+${payload.reachBonusGain}</span>`;
+        pointsBlock.appendChild(row);
+      }
+      card.appendChild(pointsBlock);
+    }
+
+    // 裏ドラ表示牌（リーチ和了時のみ）
+    if (payload.uraDoraIndicators && payload.uraDoraIndicators.length > 0) {
+      const ura = document.createElement('div');
+      ura.className = 'agari-ura';
+      ura.innerHTML = '<div class="ura-title">裏ドラ表示</div>';
+      const tiles = document.createElement('div');
+      tiles.className = 'tile-row';
+      for (const t of payload.uraDoraIndicators) tiles.appendChild(makeTileEl(t));
+      ura.appendChild(tiles);
+      card.appendChild(ura);
+    }
+
+    // 次局ボタン
+    const next = document.createElement('button');
+    next.className = 'action-btn primary-next';
+    next.textContent = '次の局へ ➡';
+    next.addEventListener('click', () => {
+      next.disabled = true;
+      fm.sendNextHand();
+    });
+    card.appendChild(next);
+
+    el.appendChild(card);
+    el.classList.add('show');
+  }
+  function hideAgariOverlay() {
+    const el = document.getElementById('agari-overlay');
+    if (el) el.classList.remove('show');
+  }
+
+  // 対局終了オーバーレイ
+  function showGameEndOverlay(payload) {
+    let el = document.getElementById('gameend-overlay');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'gameend-overlay';
+      el.className = 'result-overlay';
+      document.body.appendChild(el);
+    }
+    el.innerHTML = '';
+    const card = document.createElement('div');
+    card.className = 'result-card gameend-card';
+
+    const h2 = document.createElement('h2');
+    h2.textContent = payload.reason === 'tobi' ? '🏁 トビ終了' : '🏁 対局終了';
+    card.appendChild(h2);
+
+    const sub = document.createElement('div');
+    sub.className = 'result-sub';
+    sub.textContent = payload.reason === 'tobi'
+      ? 'マイナス点でトビになりました'
+      : '全6局を終えました';
+    card.appendChild(sub);
+
+    // 順位表
+    const rank = document.createElement('div');
+    rank.className = 'ranking';
+    payload.ranking.forEach((p, i) => {
+      const row = document.createElement('div');
+      row.className = 'rank-row';
+      row.innerHTML = `
+        <span class="rank-num">${i + 1}位</span>
+        <span class="rank-name">${escapeHtml(p.name)}</span>
+        <span class="rank-score">${p.score} 点</span>
+      `;
+      rank.appendChild(row);
+    });
+    card.appendChild(rank);
+
+    el.appendChild(card);
     el.classList.add('show');
   }
 
