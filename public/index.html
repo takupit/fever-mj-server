@@ -246,15 +246,17 @@
   }
   .dora-title { font-size: 11px; color: #ffd700; min-width: 50px; }
 
-  /* 牌の見た目 */
+  /* ============================
+     牌のビジュアル（フェーズ5a で SVG 化）
+     ============================ */
   .tile {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 24px;
-    height: 32px;
-    background: linear-gradient(180deg, #fff8e1 0%, #f0e0b0 100%);
-    border: 1.5px solid #8b6914;
+    width: 26px;
+    height: 35px;
+    background: linear-gradient(180deg, #ffffff 0%, #fff8e1 50%, #fff5d6 100%);
+    border: 1.5px solid #c9a96e;
     border-radius: 4px;
     font-size: 14px;
     line-height: 1;
@@ -263,9 +265,32 @@
     font-family: 'Yu Gothic', sans-serif;
     box-shadow: 0 1px 2px rgba(0,0,0,0.3);
     user-select: none;
+    overflow: hidden;
+    position: relative;
+    padding: 1px;
   }
+  /* スート別の文字色 */
+  .tile.suit-m { color: #c62828; }
+  .tile.suit-p { color: #1565c0; }
+  .tile.suit-s { color: #2e7d32; }
+  .tile.suit-z { color: #1a1a1a; }
   .tile.red       { color: #c62828; }
-  .tile.fever     { box-shadow: 0 0 6px rgba(255, 215, 0, 0.7); border-color: #ffd700; }
+  /* FEVER 牌（七萬・七筒）金色枠 */
+  .tile.fever-tile {
+    border-color: #ffd700 !important;
+    border-width: 2px !important;
+    box-shadow:
+      inset 0 1px 0 #fff5d6,
+      inset 0 -2px 3px #ffd700,
+      0 0 6px rgba(255, 215, 0, 0.5),
+      0 2px 0 #c9a000,
+      0 3px 4px rgba(0,0,0,0.4) !important;
+  }
+  /* 旧 .tile.fever 互換（先頭で定義） */
+  .tile.fever {
+    border-color: #ffd700;
+    box-shadow: 0 0 6px rgba(255,215,0,0.6);
+  }
   .tile.back {
     background: linear-gradient(135deg, #4a3a1a, #2a1a08);
     border-color: #1a0a00;
@@ -281,12 +306,155 @@
     display: flex;
     flex-wrap: wrap;
     gap: 2px;
-    min-height: 32px;
+    min-height: 35px;
   }
   .tile-row-small .tile {
     width: 18px;
     height: 24px;
-    font-size: 11px;
+    font-size: 10px;
+  }
+
+  /* 字牌：中央に大きな漢字 */
+  .tile-jihai {
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Yuji Mai', 'Yu Mincho', serif;
+    font-weight: 900;
+    font-size: 130%;
+    line-height: 1;
+    color: #1a1a1a;
+  }
+  .tile-jihai.hatsu { color: #1a5d2c; }
+  .tile-jihai.chun { color: #c62828; }
+  .tile-jihai.haku {
+    border: 2px solid #c9a000;
+    border-radius: 3px;
+    width: 60%; height: 65%;
+    margin: auto;
+    box-shadow: inset 0 0 0 1px #fff8e1;
+  }
+
+  /* 萬子：数字 + 萬の縦並び */
+  .tile.suit-m {
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+  }
+  .tile-mn-num {
+    font-family: 'Yuji Boku', 'Yuji Mai', 'Yu Mincho', serif;
+    font-weight: 900;
+    font-size: 75%;
+    line-height: 1;
+    color: #1a1a1a;
+    -webkit-text-stroke: 0.3px #1a1a1a;
+  }
+  .tile-mn-lbl {
+    font-family: 'Yuji Boku', 'Yuji Mai', 'Yu Mincho', serif;
+    font-weight: 900;
+    font-size: 50%;
+    margin-top: 4%;
+    line-height: 1;
+    color: #c62828;
+    -webkit-text-stroke: 0.3px #c62828;
+  }
+
+  /* 索子：SVG コンテナ */
+  .souzu {
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    padding: 6%;
+  }
+  .souzu svg { width: 100%; height: 100%; }
+  .souzu.souzu-9 {
+    display: grid;
+    grid-template: 1fr 1fr 1fr / 1fr 1fr 1fr;
+    gap: 1%;
+    padding: 2%;
+  }
+  .bamboo {
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+    min-width: 0; min-height: 0;
+  }
+  .bamboo svg { width: 100%; height: 100%; display: block; max-width: 100%; max-height: 100%; }
+
+  /* 筒子：SVG 車輪型 */
+  .pinzu {
+    width: 100%; height: 100%;
+    display: grid;
+    padding: 8%;
+    position: relative;
+    box-sizing: border-box;
+    place-content: center;
+    place-items: center;
+  }
+  .pinzu-dot {
+    aspect-ratio: 1;
+    width: 100%;
+    height: auto;
+    max-width: 100%; max-height: 100%;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .pinzu-dot svg { width: 100%; height: 100%; display: block; }
+  .tile.suit-p.red .pinzu-dot svg {
+    filter: drop-shadow(0 0 2px rgba(255,80,80,0.7));
+  }
+  .pinzu-1 { grid-template: 1fr / 1fr; padding: 18%; }
+  .pinzu-2 { grid-template: 1fr 1fr / 1fr; gap: 6%; padding: 12% 32%; }
+  .pinzu-3 { grid-template: 1fr 1fr 1fr / 1fr 1fr 1fr; gap: 2%; padding: 8%; }
+  .pinzu-3 .pinzu-dot:nth-child(1) { grid-area: 3/1; }
+  .pinzu-3 .pinzu-dot:nth-child(2) { grid-area: 2/2; }
+  .pinzu-3 .pinzu-dot:nth-child(3) { grid-area: 1/3; }
+  .pinzu-4 { grid-template: 1fr 1fr / 1fr 1fr; gap: 4%; padding: 10% 12%; }
+  .pinzu-5 { grid-template: 1fr 1fr 1fr / 1fr 1fr 1fr; gap: 2%; padding: 5%; }
+  .pinzu-5 .pinzu-dot:nth-child(1) { grid-area: 1/1; }
+  .pinzu-5 .pinzu-dot:nth-child(2) { grid-area: 1/3; }
+  .pinzu-5 .pinzu-dot:nth-child(3) { grid-area: 2/2; }
+  .pinzu-5 .pinzu-dot:nth-child(4) { grid-area: 3/1; }
+  .pinzu-5 .pinzu-dot:nth-child(5) { grid-area: 3/3; }
+  .pinzu-6 { grid-template: 1fr 1fr 1fr / 1fr 1fr; gap: 3%; padding: 6% 12%; }
+  .pinzu-7 {
+    position: relative;
+    width: 100%; height: 100%;
+    display: block !important;
+    padding: 0 !important;
+  }
+  .pinzu-7 .pinzu-dot {
+    position: absolute;
+    width: 26%; height: 17%;
+  }
+  .pinzu-7 .pinzu-dot:nth-child(1) { top: 17%; left: 9%; }
+  .pinzu-7 .pinzu-dot:nth-child(2) { top: 23%; left: 37%; }
+  .pinzu-7 .pinzu-dot:nth-child(3) { top: 29%; left: 65%; }
+  .pinzu-7 .pinzu-dot:nth-child(4) { top: 56%; left: 20%; }
+  .pinzu-7 .pinzu-dot:nth-child(5) { top: 56%; left: 54%; }
+  .pinzu-7 .pinzu-dot:nth-child(6) { top: 78%; left: 20%; }
+  .pinzu-7 .pinzu-dot:nth-child(7) { top: 78%; left: 54%; }
+  .pinzu-8 { grid-template: 1fr 1fr 1fr 1fr / 1fr 1fr; gap: 3%; padding: 8% 18%; }
+  .pinzu-9 {
+    grid-template: 1fr 1fr 1fr / 1fr 1fr 1fr;
+    grid-auto-flow: column;
+    gap: 2%; padding: 4%;
+  }
+
+  /* 待ち牌（リーチ後の自分の手牌中の待ち） */
+  .tile.wait-tile {
+    outline: 2px solid #00e5ff !important;
+    outline-offset: 1px;
+    animation: wait-tile-glow 1s infinite alternate;
+    position: relative;
+  }
+  .tile.wait-tile::after {
+    content: '待';
+    position: absolute;
+    bottom: 1px; right: 1px;
+    font-size: 8px;
+    color: #00e5ff;
+    font-weight: bold;
+  }
+  @keyframes wait-tile-glow {
+    from { box-shadow: 0 0 4px rgba(0,229,255,0.6); }
+    to   { box-shadow: 0 0 12px rgba(0,229,255,1); }
   }
 
   /* 対戦相手エリア */
@@ -852,6 +1020,218 @@
     50%      { box-shadow: 0 0 14px rgba(0,229,255,0.6); }
   }
 
+  /* ============================
+     カットイン演出（ロン/ツモ/リーチ用）
+     ============================ */
+  #cutin-overlay {
+    position: fixed; inset: 0;
+    pointer-events: none;
+    z-index: 250;
+    overflow: hidden;
+  }
+  #action-splash {
+    position: fixed; inset: 0;
+    pointer-events: none;
+    z-index: 240;
+    overflow: hidden;
+  }
+  .cutin-bg-band {
+    position: absolute;
+    top: -20%; left: -30%;
+    width: 160%; height: 140%;
+    transform: rotate(-12deg) translateX(-150%);
+    background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(0,0,0,0.85) 15%,
+      rgba(0,0,0,0.85) 85%,
+      transparent 100%);
+    animation: cutin-band-slide 1.4s cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
+  }
+  .cutin-bg-band.ron {
+    background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(120,0,30,0.92) 10%, rgba(255,30,60,0.95) 50%,
+      rgba(120,0,30,0.92) 90%, transparent 100%);
+  }
+  .cutin-bg-band.tsumo {
+    background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(0,60,120,0.92) 10%, rgba(0,229,255,0.95) 50%,
+      rgba(0,60,120,0.92) 90%, transparent 100%);
+  }
+  .cutin-bg-band.reach {
+    background: linear-gradient(90deg,
+      transparent 0%,
+      rgba(120,90,0,0.92) 10%, rgba(255,215,0,0.95) 50%,
+      rgba(120,90,0,0.92) 90%, transparent 100%);
+  }
+  @keyframes cutin-band-slide {
+    0%   { transform: rotate(-12deg) translateX(-150%); }
+    35%  { transform: rotate(-12deg) translateX(0); }
+    65%  { transform: rotate(-12deg) translateX(0); }
+    100% { transform: rotate(-12deg) translateX(150%); }
+  }
+  .cutin-line {
+    position: absolute;
+    left: -30%;
+    width: 160%; height: 6px;
+    background: linear-gradient(90deg, transparent, #fff 30%, #fff 70%, transparent);
+    transform: rotate(-12deg) translateX(-150%);
+    box-shadow: 0 0 15px #fff, 0 0 30px rgba(255,255,255,0.5);
+  }
+  .cutin-line.top { top: 30%; animation: cutin-band-slide 1.4s cubic-bezier(0.2, 0.8, 0.3, 1) 0.05s forwards; }
+  .cutin-line.bottom { top: 70%; animation: cutin-band-slide 1.4s cubic-bezier(0.2, 0.8, 0.3, 1) 0.1s forwards; }
+  .cutin-text-wrap {
+    position: absolute;
+    top: 50%; left: 55%;
+    transform: translate(-50%, -50%) rotate(-12deg);
+    z-index: 3;
+    opacity: 0;
+    animation: cutin-text-pop 1.4s ease-out forwards;
+  }
+  .cutin-character {
+    position: absolute;
+    top: 50%; left: 18%;
+    transform: translate(-50%, -50%) rotate(-12deg);
+    width: 160px; height: 180px;
+    z-index: 2;
+    opacity: 0;
+    animation: cutin-char-pop 1.4s ease-out forwards;
+  }
+  @keyframes cutin-char-pop {
+    0%, 25% { opacity: 0; transform: translate(-50%, -50%) rotate(-12deg) translateX(-200px) scale(0.5); }
+    40%     { opacity: 1; transform: translate(-50%, -50%) rotate(-12deg) translateX(20px) scale(1.15); }
+    55%     { transform: translate(-50%, -50%) rotate(-12deg) translateX(0) scale(1); }
+    70%     { transform: translate(-50%, -50%) rotate(-12deg) translateX(0) scale(1.05); }
+    85%     { opacity: 1; transform: translate(-50%, -50%) rotate(-12deg) translateX(0) scale(1); }
+    100%    { opacity: 0; transform: translate(-50%, -50%) rotate(-12deg) translateX(30px) scale(1); }
+  }
+  @keyframes cutin-text-pop {
+    0%, 20% { opacity: 0; transform: translate(-50%, -50%) rotate(-12deg) scale(0.3); }
+    35%     { opacity: 1; transform: translate(-50%, -50%) rotate(-12deg) scale(1.3); }
+    50%     { opacity: 1; transform: translate(-50%, -50%) rotate(-12deg) scale(1); }
+    75%     { opacity: 1; transform: translate(-50%, -50%) rotate(-12deg) scale(1.05); }
+    100%    { opacity: 0; transform: translate(-50%, -50%) rotate(-12deg) scale(1.5); }
+  }
+  .cutin-main-text {
+    font-family: 'Bungee', 'Yu Gothic', sans-serif;
+    font-size: 80px;
+    font-weight: 900;
+    letter-spacing: 6px;
+    line-height: 1;
+    text-align: center;
+    white-space: nowrap;
+    filter: drop-shadow(0 0 30px currentColor) drop-shadow(2px 4px 0 rgba(0,0,0,0.8));
+  }
+  .cutin-main-text.ron {
+    color: #fff;
+    text-shadow:
+      -3px -3px 0 #c5002a, 3px -3px 0 #c5002a,
+      -3px 3px 0 #c5002a, 3px 3px 0 #c5002a,
+      0 0 30px #ff2d55, 0 0 60px rgba(255,45,85,0.8);
+  }
+  .cutin-main-text.tsumo {
+    color: #fff;
+    text-shadow:
+      -3px -3px 0 #0066aa, 3px -3px 0 #0066aa,
+      -3px 3px 0 #0066aa, 3px 3px 0 #0066aa,
+      0 0 30px #00e5ff, 0 0 60px rgba(0,229,255,0.8);
+  }
+  .cutin-main-text.reach {
+    color: #fff;
+    text-shadow:
+      -3px -3px 0 #aa8800, 3px -3px 0 #aa8800,
+      -3px 3px 0 #aa8800, 3px 3px 0 #aa8800,
+      0 0 30px #ffd700, 0 0 60px rgba(255,215,0,0.8);
+  }
+  .cutin-sub-text {
+    font-family: 'DotGothic16', monospace;
+    font-size: 14px;
+    color: rgba(255,255,255,0.9);
+    letter-spacing: 4px;
+    margin-top: 8px;
+    text-align: center;
+    text-shadow: 2px 2px 0 rgba(0,0,0,0.8);
+  }
+  /* スプラッシュ用フラッシュ・稲妻・火花アニメ */
+  @keyframes flash-fade {
+    0%   { opacity: 1; }
+    40%  { opacity: 0.7; }
+    100% { opacity: 0; }
+  }
+  @keyframes lightning-flash {
+    0%   { opacity: 0; transform: scale(0.5); }
+    15%  { opacity: 1; transform: scale(1.1); }
+    25%  { opacity: 0.3; }
+    40%  { opacity: 1; transform: scale(1); }
+    60%  { opacity: 0.8; }
+    100% { opacity: 0; transform: scale(1); }
+  }
+  @keyframes spark-fly {
+    0%   { opacity: 1; transform: translate(-50%, -50%) translate(0, 0) scale(1.5); }
+    60%  { opacity: 1; transform: translate(-50%, -50%) translate(calc(var(--tx) * 0.7), calc(var(--ty) * 0.7)) scale(1); }
+    100% { opacity: 0; transform: translate(-50%, -50%) translate(var(--tx), var(--ty)) scale(0.3); }
+  }
+  /* シンプルなアクションテキスト（pon/kan/kita 用） */
+  .action-splash-text {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: 'Bungee', 'Yu Gothic', sans-serif;
+    font-size: 48px;
+    font-weight: 900;
+    letter-spacing: 4px;
+    z-index: 245;
+    pointer-events: none;
+    animation: action-pop 0.9s ease-out forwards;
+    text-shadow: 0 0 20px currentColor, 2px 2px 0 #000;
+  }
+  .action-splash-text.pon  { color: #ff8c00; }
+  .action-splash-text.kan  { color: #ba68c8; }
+  .action-splash-text.kita { color: #66bb6a; }
+  @keyframes action-pop {
+    0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
+    20%  { opacity: 1; transform: translate(-50%, -50%) scale(1.3) rotate(-5deg); }
+    40%  { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(0); }
+    80%  { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
+  }
+
+  /* ============================
+     残り山牌の警告（仕様書 13. 残り山牌の警告表示）
+     ============================ */
+  .wall-label.warn strong {
+    color: #ff8c00 !important;
+    animation: wall-warning 0.8s ease-in-out infinite;
+  }
+  .wall-label.danger strong {
+    color: #ff2d55 !important;
+    animation: wall-danger 0.5s ease-in-out infinite;
+  }
+  @keyframes wall-warning {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.15); }
+  }
+  @keyframes wall-danger {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.25); }
+  }
+  .wall-label .warn-note {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 6px;
+    background: #ff2d55;
+    color: #fff;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: bold;
+    animation: warn-blink 0.6s steps(2) infinite;
+  }
+  @keyframes warn-blink {
+    0%, 50%  { opacity: 1; }
+    51%, 100%{ opacity: 0.3; }
+  }
+
   /* トースト */
   .toast {
     position: fixed;
@@ -1043,6 +1423,10 @@
 
   <!-- トースト -->
   <div id="toast" class="toast"></div>
+
+  <!-- カットイン・アクションスプラッシュ用オーバーレイ（フェーズ5a） -->
+  <div id="cutin-overlay"></div>
+  <div id="action-splash"></div>
 
 </div>
 

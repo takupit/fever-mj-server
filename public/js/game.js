@@ -25,16 +25,13 @@
   };
 
   // ------------------------------------------------------------
-  // 牌コード → 表示文字（仕様書 15. 牌記法 参照）
-  //   m1〜m9 → 一萬〜九萬
-  //   p1〜p9 → ①〜⑨（p5 のみ赤）
-  //   s1, s9 → ①索, ⑨索
-  //   z1〜z7 → 東 南 西 北 白 發 中
+  // 牌コード → 表示用ラベル（簡易テキスト・トースト等で使用）
   // ------------------------------------------------------------
   const MANZU_LABELS = ['', '一萬', '二萬', '三萬', '四萬', '五萬', '六萬', '七萬', '八萬', '九萬'];
   const PINZU_LABELS = ['', '①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨'];
   const JIHAI_LABELS = { z1: '東', z2: '南', z3: '西', z4: '北', z5: '白', z6: '發', z7: '中' };
   const WIND_NAMES = { E: '東家', S: '南家', W: '西家', N: '北家' };
+  const MANZU_KANJI = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
 
   function tileToLabel(tile) {
     if (!tile) return '';
@@ -48,8 +45,147 @@
     return tile;
   }
 
-  // 牌1枚を表す DOM 要素を作る
-  // options: { back: true で裏向き、small: true で小さめ }
+  // ------------------------------------------------------------
+  // SVG 牌ファクトリ（フェーズ5a で旧 play.html から移植）
+  //   makePinzu / makePinzuDot / makePinzu1SVG / getPinzuColors:
+  //     筒子の車輪型 SVG。1筒は特別デザイン、5筒は赤五筒対応
+  //   makeSouzu: 索子（1索=孔雀風、9索=8字型）
+  //   makeTileEl: 上記を組み合わせて DOM 要素を作る
+  // ------------------------------------------------------------
+
+  // 筒子の各円の色（実物の麻雀牌準拠）
+  const PINZU_BLUE = '#1a3a78';
+  const PINZU_RED = '#e60000';
+  function getPinzuColors(n) {
+    const B = PINZU_BLUE, R = PINZU_RED;
+    const map = {
+      1: [B], 2: [B, B], 3: [B, B, B], 4: [B, B, B, B],
+      5: [B, B, R, B, B], 6: [R, R, B, B, B, B],
+      7: [R, R, R, B, B, B, B], 8: [B, B, B, B, B, B, B, B],
+      9: [B, R, B, B, R, B, B, R, B],
+    };
+    return map[n] || [];
+  }
+
+  // 筒子1個の SVG（車輪型）
+  function makePinzuDot(color) {
+    const dot = document.createElement('div');
+    dot.className = 'pinzu-dot';
+    dot.innerHTML = `<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+      <circle cx="16" cy="16" r="14.5" fill="${color}"/>
+      <circle cx="16" cy="16" r="11" fill="#fff8e1"/>
+      <circle cx="16" cy="16" r="10.5" fill="none" stroke="${color}" stroke-width="0.8"/>
+      <g fill="${color}">
+        <circle cx="16" cy="9" r="2"/>
+        <circle cx="22.06" cy="12.5" r="2"/>
+        <circle cx="22.06" cy="19.5" r="2"/>
+        <circle cx="16" cy="23" r="2"/>
+        <circle cx="9.94" cy="19.5" r="2"/>
+        <circle cx="9.94" cy="12.5" r="2"/>
+      </g>
+      <circle cx="16" cy="16" r="2" fill="#fff8e1" stroke="${color}" stroke-width="0.5"/>
+    </svg>`;
+    return dot;
+  }
+
+  // 1筒：豪華な特別デザイン
+  function makePinzu1SVG() {
+    let cogPath = '';
+    const cogCount = 16;
+    for (let i = 0; i < cogCount; i++) {
+      const a1 = (i * 2 * Math.PI / cogCount) - Math.PI / 2;
+      const a2 = ((i + 0.5) * 2 * Math.PI / cogCount) - Math.PI / 2;
+      const a3 = ((i + 1) * 2 * Math.PI / cogCount) - Math.PI / 2;
+      const r1 = 27, r2 = 29;
+      const x1 = 30 + r1 * Math.cos(a1), y1 = 30 + r1 * Math.sin(a1);
+      const x2 = 30 + r2 * Math.cos(a2), y2 = 30 + r2 * Math.sin(a2);
+      const x3 = 30 + r1 * Math.cos(a3), y3 = 30 + r1 * Math.sin(a3);
+      if (i === 0) cogPath += `M ${x1.toFixed(2)} ${y1.toFixed(2)} `;
+      cogPath += `L ${x2.toFixed(2)} ${y2.toFixed(2)} L ${x3.toFixed(2)} ${y3.toFixed(2)} `;
+    }
+    cogPath += 'Z';
+    return `<svg viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+      <path d="${cogPath}" fill="#1a3a78"/>
+      <circle cx="30" cy="30" r="22" fill="#fff8e1"/>
+      <circle cx="30" cy="30" r="20" fill="#1a5d2c"/>
+      <circle cx="30" cy="30" r="17" fill="#fff8e1"/>
+      <g fill="#d4a017">
+        <circle cx="30" cy="14.5" r="1.5"/><circle cx="41" cy="19" r="1.5"/>
+        <circle cx="45.5" cy="30" r="1.5"/><circle cx="41" cy="41" r="1.5"/>
+        <circle cx="30" cy="45.5" r="1.5"/><circle cx="19" cy="41" r="1.5"/>
+        <circle cx="14.5" cy="30" r="1.5"/><circle cx="19" cy="19" r="1.5"/>
+      </g>
+      <g fill="#e60000">
+        <circle cx="30" cy="22" r="3"/><circle cx="37" cy="26" r="3"/>
+        <circle cx="37" cy="34" r="3"/><circle cx="30" cy="38" r="3"/>
+        <circle cx="23" cy="34" r="3"/><circle cx="23" cy="26" r="3"/>
+      </g>
+      <circle cx="30" cy="30" r="3" fill="#fff8e1"/>
+      <circle cx="30" cy="30" r="1.5" fill="#d4a017"/>
+    </svg>`;
+  }
+
+  // 筒子全体（1〜9）
+  function makePinzu(n, isRedFive) {
+    const c = document.createElement('div');
+    c.className = `pinzu pinzu-${n}`;
+    if (n === 1) {
+      const dot = document.createElement('div');
+      dot.className = 'pinzu-dot';
+      dot.innerHTML = makePinzu1SVG();
+      c.appendChild(dot);
+      return c;
+    }
+    const colors = getPinzuColors(n);
+    for (let i = 0; i < n; i++) {
+      c.appendChild(makePinzuDot(isRedFive && n === 5 ? '#e60000' : colors[i]));
+    }
+    return c;
+  }
+
+  // 索子（1索=孔雀風、9索=8字型を3x3）
+  function makeSouzu(n) {
+    const c = document.createElement('div');
+    c.className = 'souzu';
+    if (n === 1) {
+      c.innerHTML = `<svg viewBox="0 0 60 80" xmlns="http://www.w3.org/2000/svg">
+        <ellipse cx="30" cy="68" rx="20" ry="10" fill="#1a5d2c"/>
+        <path d="M15 68 Q20 60 30 58 Q40 60 45 68 Z" fill="#2d7a3e"/>
+        <ellipse cx="30" cy="50" rx="11" ry="14" fill="#2d7a3e"/>
+        <ellipse cx="30" cy="48" rx="9" ry="11" fill="#3d9050"/>
+        <ellipse cx="30" cy="52" rx="6" ry="7" fill="#ffc107"/>
+        <ellipse cx="22" cy="50" rx="5" ry="9" fill="#1565c0" transform="rotate(-15 22 50)"/>
+        <ellipse cx="38" cy="50" rx="5" ry="9" fill="#1565c0" transform="rotate(15 38 50)"/>
+        <circle cx="30" cy="32" r="10" fill="#c62828"/>
+        <circle cx="30" cy="30" r="8" fill="#e53935"/>
+        <path d="M30 18 L26 24 L30 22 L34 24 Z" fill="#ffc107"/>
+        <polygon points="30,30 27,38 33,38" fill="#ffc107"/>
+        <polygon points="30,32 28,36 32,36" fill="#c4a000"/>
+        <circle cx="27" cy="28" r="1.5" fill="#000"/>
+        <circle cx="33" cy="28" r="1.5" fill="#000"/>
+        <line x1="28" y1="62" x2="26" y2="72" stroke="#c4a000" stroke-width="1.5"/>
+        <line x1="32" y1="62" x2="34" y2="72" stroke="#c4a000" stroke-width="1.5"/>
+      </svg>`;
+    } else {
+      c.classList.add('souzu-9');
+      const colors = ['#1a5d2c', '#1a5d2c', '#1a5d2c', '#c62828', '#c62828', '#c62828', '#1a5d2c', '#1a5d2c', '#1a5d2c'];
+      for (let i = 0; i < 9; i++) {
+        const bamboo = document.createElement('div');
+        bamboo.className = 'bamboo';
+        bamboo.innerHTML = `<svg viewBox="0 0 20 24" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+          <ellipse cx="10" cy="7" rx="4" ry="4" fill="none" stroke="${colors[i]}" stroke-width="2"/>
+          <line x1="10" y1="11" x2="10" y2="13" stroke="${colors[i]}" stroke-width="2"/>
+          <ellipse cx="10" cy="17" rx="4" ry="4" fill="none" stroke="${colors[i]}" stroke-width="2"/>
+          <circle cx="10" cy="12" r="1" fill="${colors[i]}"/>
+        </svg>`;
+        c.appendChild(bamboo);
+      }
+    }
+    return c;
+  }
+
+  // 牌1枚を表す DOM 要素を作る（SVG 描画版）
+  // options: { back: true で裏向き }
   function makeTileEl(tile, options = {}) {
     const div = document.createElement('div');
     div.className = 'tile';
@@ -61,12 +197,55 @@
       div.textContent = '';
       return div;
     }
-    div.textContent = tileToLabel(tile);
-    div.dataset.tile = tile;
-    if (tile.endsWith('r')) div.classList.add('red');
-    // 七筒・七萬は FEVER 牌として強調
+    const isRedTile = tile.endsWith('r');
     const base = tile.replace('r', '');
-    if (base === 'p7' || base === 'm7') div.classList.add('fever');
+    const suit = base[0];
+    div.classList.add(`suit-${suit}`);
+    if (isRedTile) div.classList.add('red');
+    // 七筒・七萬は FEVER 牌として金枠
+    if (base === 'm7' || base === 'p7') div.classList.add('fever-tile');
+    div.dataset.tile = tile;
+
+    // 字牌
+    if (suit === 'z') {
+      const inner = document.createElement('div');
+      inner.className = 'tile-jihai';
+      if (base === 'z6') inner.classList.add('hatsu');
+      if (base === 'z7') inner.classList.add('chun');
+      if (base === 'z5') {
+        inner.classList.add('haku'); // 白は空の枠
+      } else {
+        inner.textContent = JIHAI_LABELS[base] || '';
+      }
+      div.appendChild(inner);
+      return div;
+    }
+
+    const n = parseInt(base[1], 10);
+    // 萬子
+    if (suit === 'm') {
+      const num = document.createElement('div');
+      num.className = 'tile-mn-num';
+      num.textContent = MANZU_KANJI[n] || '';
+      const lbl = document.createElement('div');
+      lbl.className = 'tile-mn-lbl';
+      lbl.textContent = '萬';
+      div.appendChild(num);
+      div.appendChild(lbl);
+      return div;
+    }
+    // 筒子
+    if (suit === 'p') {
+      div.appendChild(makePinzu(n, isRedTile));
+      return div;
+    }
+    // 索子
+    if (suit === 's') {
+      div.appendChild(makeSouzu(n));
+      return div;
+    }
+
+    div.textContent = tile;
     return div;
   }
 
@@ -113,6 +292,31 @@
     $('#game-round').textContent = `${roundName}${publicState.round.hand}局`;
     $('#game-honba').textContent = `${publicState.round.honba}本場`;
     $('#game-wall').textContent = String(publicState.wallCount);
+    // 残り山警告（仕様書 13. 残り山牌の警告表示）
+    //   11 枚以上: 通常
+    //   5〜10 枚: オレンジ脈動 + 「ラストN」
+    //   0〜4 枚 : 赤激しい脈動 + 「リーチ不可」
+    const wallLabel = document.querySelector('.wall-label');
+    if (!wallLabel) return;
+    wallLabel.classList.remove('warn', 'danger');
+    // 既存の warn-note を消す
+    const oldNote = wallLabel.querySelector('.warn-note');
+    if (oldNote) oldNote.remove();
+    if (publicState.wallCount <= 4) {
+      wallLabel.classList.add('danger');
+      const note = document.createElement('span');
+      note.className = 'warn-note';
+      note.textContent = 'リーチ不可';
+      wallLabel.appendChild(note);
+    } else if (publicState.wallCount <= 10) {
+      wallLabel.classList.add('warn');
+      const note = document.createElement('span');
+      note.className = 'warn-note';
+      note.style.background = '#ff8c00';
+      note.style.animation = 'none';
+      note.textContent = `ラスト${publicState.wallCount}`;
+      wallLabel.appendChild(note);
+    }
   }
 
   function renderDora(publicState) {
@@ -181,8 +385,16 @@
     const reachOptions = view.myTurnOptions ? (view.myTurnOptions.reachOptions || []) : [];
     const reachIdxMap = new Map(reachOptions.map((o) => [o.discardIdx, o]));
 
+    // リーチ後の待ち牌セット（自分の手牌の中の待ち牌を強調）
+    const reachWaits = (view.myHand && view.myHand.reachWaits) ? view.myHand.reachWaits : [];
+    const reachWaitsSet = new Set(reachWaits);
+
     // 牌をクリック可能にする処理
     const attachClick = (tileEl, tile, handIdx) => {
+      // 待ち牌の強調（リーチ後）
+      if (reachWaitsSet.has(tile.replace('r', ''))) {
+        tileEl.classList.add('wait-tile');
+      }
       if (view.reachMode) {
         // リーチモード: リーチ候補にだけクリックを付ける
         const opt = reachIdxMap.get(handIdx);
@@ -611,30 +823,40 @@
       startClaimCountdown(view.pendingClaim);
     });
 
-    // 誰かが何かしたという通知（ログ的に使う・トーストは過剰なので控えめに）
+    // 誰かが何かしたという通知（トースト + 一部はカットイン）
     fm.on('game:action-result', ({ action, playerId, tile, isTsumogiri, isAuto }) => {
       if (!view.publicState) return;
       const name = view.publicState.players.find((p) => p.id === playerId)?.name || playerId;
-      if (playerId === fm.state.playerId) return; // 自分の行動はトーストしない
+      const isSelf = playerId === fm.state.playerId;
       const label = tile ? tileToLabel(tile) : '';
+
       if (action === 'discard') {
-        showToast(`${name} が ${label} を${isTsumogiri ? 'ツモ切り' : '打牌'}`, 'info', 1200);
+        if (!isSelf) showToast(`${name} が ${label} を${isTsumogiri ? 'ツモ切り' : '打牌'}`, 'info', 1200);
       } else if (action === 'pon') {
-        showToast(`🟠 ${name} が ${label} をポン！`, 'info', 1800);
+        showActionSplash('ポン', 'pon');
+        if (!isSelf) showToast(`🟠 ${name} が ${label} をポン！`, 'info', 1500);
       } else if (action === 'minkan' || action === 'kan') {
-        showToast(`🟣 ${name} が ${label} で明カン！`, 'info', 1800);
+        showActionSplash('カン', 'kan');
+        if (!isSelf) showToast(`🟣 ${name} が ${label} で明カン！`, 'info', 1500);
       } else if (action === 'ankan') {
-        showToast(`🟣 ${name} が暗カン (${label})`, 'info', 1800);
+        showActionSplash('カン', 'kan');
+        if (!isSelf) showToast(`🟣 ${name} が暗カン (${label})`, 'info', 1500);
       } else if (action === 'kakan') {
-        showToast(`🟣 ${name} が加カン (${label})`, 'info', 1800);
+        showActionSplash('カン', 'kan');
+        if (!isSelf) showToast(`🟣 ${name} が加カン (${label})`, 'info', 1500);
       } else if (action === 'reach') {
-        showToast(`🎯 ${name} がリーチ！`, 'ok', 2000);
+        // リーチはカットイン演出（全員に発動）
+        showActionSplash('リーチ', 'reach');
+        if (!isSelf) showToast(`🎯 ${name} がリーチ！`, 'ok', 1800);
       } else if (action === 'kita') {
-        showToast(`🟢 ${name} が北抜き${isAuto ? '（FEVER 強制）' : ''}`, 'info', 1500);
+        showActionSplash('北', 'kita');
+        if (!isSelf) showToast(`🟢 ${name} が北抜き${isAuto ? '（FEVER 強制）' : ''}`, 'info', 1500);
       } else if (action === 'kita-pon') {
-        showToast(`🟠 ${name} が北ポン！`, 'info', 1800);
+        showActionSplash('北ポン', 'pon');
+        if (!isSelf) showToast(`🟠 ${name} が北ポン！`, 'info', 1500);
       } else if (action === 'kita-kan') {
-        showToast(`🟣 ${name} が北カン！`, 'info', 1800);
+        showActionSplash('北カン', 'kan');
+        if (!isSelf) showToast(`🟣 ${name} が北カン！`, 'info', 1500);
       }
     });
 
@@ -658,7 +880,9 @@
       view.reachMode = false;
       view.pendingClaim = null;
       stopClaimCountdown();
-      showAgariOverlay(payload);
+      // ロン / ツモ のカットイン演出を先に出してから、少し遅らせてアガリ画面
+      showActionSplash(payload.isTsumo ? 'ツモ' : 'ロン', payload.isTsumo ? 'tsumo' : 'ron');
+      setTimeout(() => showAgariOverlay(payload), 1200);
       rerender();
     });
 
@@ -689,6 +913,196 @@
       view.reachMode = false;
       stopClaimCountdown();
     });
+  }
+
+  // ------------------------------------------------------------
+  // カットイン演出（フェーズ5a で旧 play.html から移植）
+  //   showActionSplash: アクション種別ごとに大きな演出を出す
+  //     ロン/ツモ/リーチ → showCutin（カットイン帯＋老師キャラ＋フラッシュ＋稲妻）
+  //     ポン/カン/北     → シンプルなアクションテキスト
+  //   showCutin: 帯がスライドイン、老師キャラがズームアップ、テキストがポップ
+  // ------------------------------------------------------------
+  function showActionSplash(text, type) {
+    const splashEl = document.getElementById('action-splash');
+    if (!splashEl) return;
+    splashEl.innerHTML = '';
+
+    const isMajor = type === 'ron' || type === 'tsumo' || type === 'reach';
+    const isRonOrTsumo = type === 'ron' || type === 'tsumo';
+
+    if (isMajor) {
+      showCutin(text, type);
+    }
+
+    if (isRonOrTsumo) {
+      // 画面フラッシュ
+      const flash = document.createElement('div');
+      flash.style.cssText = `
+        position:fixed; inset:0; z-index:241; pointer-events:none;
+        background: ${type === 'ron'
+          ? 'radial-gradient(circle, rgba(255,80,100,0.9), rgba(255,0,0,0.3) 50%, transparent 80%)'
+          : 'radial-gradient(circle, rgba(100,230,255,0.9), rgba(0,200,255,0.3) 50%, transparent 80%)'};
+        animation: flash-fade 0.6s ease-out forwards;
+      `;
+      splashEl.appendChild(flash);
+
+      // 8本の稲妻 SVG
+      const cx = window.innerWidth / 2;
+      const cy = window.innerHeight / 2;
+      const color = type === 'ron' ? '#ff2d55' : '#00e5ff';
+      const glowColor = type === 'ron' ? '#ffd700' : '#ffffff';
+      let svgPaths = '';
+      const bolts = 8;
+      for (let i = 0; i < bolts; i++) {
+        const angle = (Math.PI * 2 / bolts) * i + Math.random() * 0.3;
+        const len = Math.max(window.innerWidth, window.innerHeight) * 0.7;
+        let pathData = `M ${cx} ${cy}`;
+        const segments = 6;
+        for (let j = 1; j <= segments; j++) {
+          const t = j / segments;
+          const r = len * t;
+          const baseX = cx + Math.cos(angle) * r;
+          const baseY = cy + Math.sin(angle) * r;
+          const perpAngle = angle + Math.PI / 2;
+          const offset = (Math.random() - 0.5) * 40 * (1 - t);
+          const x = baseX + Math.cos(perpAngle) * offset;
+          const y = baseY + Math.sin(perpAngle) * offset;
+          pathData += ` L ${x.toFixed(0)} ${y.toFixed(0)}`;
+        }
+        svgPaths += `<path d="${pathData}" stroke="${color}" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>`;
+        svgPaths += `<path d="${pathData}" stroke="${glowColor}" stroke-width="1" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="1"/>`;
+      }
+      const lightning = document.createElement('div');
+      lightning.style.cssText = 'position:fixed; inset:0; pointer-events:none; z-index:242;';
+      lightning.innerHTML = `<svg width="100%" height="100%" style="filter: drop-shadow(0 0 8px ${color}) drop-shadow(0 0 16px ${color});">${svgPaths}</svg>`;
+      lightning.style.animation = 'lightning-flash 0.5s ease-out forwards';
+      splashEl.appendChild(lightning);
+
+      // 30個の火花パーティクル
+      const sparkContainer = document.createElement('div');
+      sparkContainer.style.cssText = 'position:fixed; inset:0; pointer-events:none; z-index:243;';
+      for (let i = 0; i < 30; i++) {
+        const spark = document.createElement('div');
+        const angle = Math.random() * Math.PI * 2;
+        const distance = 50 + Math.random() * 250;
+        const tx = Math.cos(angle) * distance;
+        const ty = Math.sin(angle) * distance;
+        spark.style.cssText = `
+          position:absolute; left:50%; top:50%;
+          width:4px; height:4px;
+          background:${color};
+          border-radius:50%;
+          box-shadow:0 0 8px ${color}, 0 0 16px ${glowColor};
+          --tx:${tx}px; --ty:${ty}px;
+          animation: spark-fly 0.8s ease-out forwards;
+        `;
+        sparkContainer.appendChild(spark);
+      }
+      splashEl.appendChild(sparkContainer);
+    }
+
+    // メジャー以外（ポン・カン・北）はシンプルなテキスト
+    if (!isMajor) {
+      const t = document.createElement('div');
+      t.className = `action-splash-text ${type}`;
+      t.textContent = text;
+      splashEl.appendChild(t);
+    }
+
+    // 振動（ハプティクス）
+    if (navigator.vibrate) {
+      if (type === 'ron') navigator.vibrate([120, 40, 80, 40, 120]);
+      else if (type === 'tsumo') navigator.vibrate([100, 50, 200]);
+      else if (type === 'reach') navigator.vibrate([60, 30, 100]);
+      else navigator.vibrate([50]);
+    }
+
+    const finalDuration = isMajor ? 1400 : 900;
+    setTimeout(() => { splashEl.innerHTML = ''; }, finalDuration);
+  }
+
+  function showCutin(text, type) {
+    const cutinEl = document.getElementById('cutin-overlay');
+    if (!cutinEl) return;
+    cutinEl.innerHTML = '';
+
+    const band = document.createElement('div');
+    band.className = `cutin-bg-band ${type}`;
+    cutinEl.appendChild(band);
+    const topLine = document.createElement('div');
+    topLine.className = 'cutin-line top';
+    cutinEl.appendChild(topLine);
+    const bottomLine = document.createElement('div');
+    bottomLine.className = 'cutin-line bottom';
+    cutinEl.appendChild(bottomLine);
+
+    const charDiv = document.createElement('div');
+    charDiv.className = 'cutin-character';
+    charDiv.innerHTML = makeFeverMaster(type);
+    cutinEl.appendChild(charDiv);
+
+    const textWrap = document.createElement('div');
+    textWrap.className = 'cutin-text-wrap';
+    const mainText = document.createElement('div');
+    mainText.className = `cutin-main-text ${type}`;
+    mainText.textContent = text;
+    textWrap.appendChild(mainText);
+    const subText = document.createElement('div');
+    subText.className = 'cutin-sub-text';
+    subText.textContent = '★ FEVER老師 ★';
+    textWrap.appendChild(subText);
+    cutinEl.appendChild(textWrap);
+
+    setTimeout(() => { cutinEl.innerHTML = ''; }, 1500);
+  }
+
+  // オリジナル FEVER 老師キャラ SVG（旧 play.html から）
+  function makeFeverMaster(type) {
+    const expressions = {
+      ron:   { mouth: 'M 90 165 Q 100 178 110 165', brow: '-3', exclaim: '！' },
+      tsumo: { mouth: 'M 88 168 Q 100 180 112 168', brow: '0',  exclaim: '★' },
+      reach: { mouth: 'M 92 168 L 108 168',         brow: '-1', exclaim: '⚡' },
+    };
+    const expr = expressions[type] || expressions.tsumo;
+    const browTop = 98 + parseInt(expr.brow, 10);
+    return `
+      <svg viewBox="0 0 200 220" xmlns="http://www.w3.org/2000/svg" style="width:100%; height:100%; filter: drop-shadow(0 4px 12px rgba(0,0,0,0.7));">
+        <defs>
+          <radialGradient id="bg-rad-${type}" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="#ffe680" stop-opacity="0.8"/>
+            <stop offset="60%" stop-color="#ffaa00" stop-opacity="0.4"/>
+            <stop offset="100%" stop-color="transparent"/>
+          </radialGradient>
+        </defs>
+        <circle cx="100" cy="110" r="100" fill="url(#bg-rad-${type})"/>
+        <g stroke="#fff" stroke-width="2" opacity="0.4">
+          ${Array.from({ length: 16 }).map((_, i) => {
+            const a = (i * Math.PI * 2 / 16);
+            const x1 = 100 + Math.cos(a) * 60, y1 = 110 + Math.sin(a) * 60;
+            const x2 = 100 + Math.cos(a) * 105, y2 = 110 + Math.sin(a) * 105;
+            return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;
+          }).join('')}
+        </g>
+        <path d="M 50 200 Q 60 175 80 165 L 100 180 L 120 165 Q 140 175 150 200 Z" fill="#c5002a" stroke="#7a0019" stroke-width="2"/>
+        <ellipse cx="100" cy="175" rx="22" ry="14" fill="#f8d8a8"/>
+        <ellipse cx="100" cy="125" rx="55" ry="60" fill="#fae0b5"/>
+        <ellipse cx="100" cy="125" rx="55" ry="60" fill="none" stroke="#c9956c" stroke-width="1.5"/>
+        <ellipse cx="100" cy="75"  rx="45" ry="35" fill="#f5d4a0"/>
+        <path d="M 50 90 Q 45 100 48 115 Q 52 120 60 118 Q 55 105 58 92 Z" fill="#fff" stroke="#ccc" stroke-width="1"/>
+        <path d="M 150 90 Q 155 100 152 115 Q 148 120 140 118 Q 145 105 142 92 Z" fill="#fff" stroke="#ccc" stroke-width="1"/>
+        <path d="M 70 102 Q 78 ${browTop} 88 102 Q 82 105 70 105 Z" fill="#fff" stroke="#ccc" stroke-width="0.8"/>
+        <path d="M 112 102 Q 122 ${browTop} 130 102 Q 118 105 112 105 Z" fill="#fff" stroke="#ccc" stroke-width="0.8"/>
+        <circle cx="79"  cy="120" r="14" fill="#2a2a2a" stroke="#1a1a1a" stroke-width="2"/>
+        <circle cx="121" cy="120" r="14" fill="#2a2a2a" stroke="#1a1a1a" stroke-width="2"/>
+        <line x1="93" y1="120" x2="107" y2="120" stroke="#1a1a1a" stroke-width="2"/>
+        <path d="M 100 130 Q 95 145 98 152 Q 100 154 102 152 Q 105 145 100 130" fill="#e8c090" stroke="#c9956c" stroke-width="1"/>
+        <path d="M 78 158 Q 85 160 92 158 Q 95 162 100 161 Q 105 162 108 158 Q 115 160 122 158 Q 120 155 110 156 Q 105 155 100 155 Q 95 155 90 156 Q 80 155 78 158 Z" fill="#fff" stroke="#ccc" stroke-width="0.8"/>
+        <path d="${expr.mouth}" fill="none" stroke="#7a0019" stroke-width="2.5" stroke-linecap="round"/>
+        <path d="M 80 178 Q 75 195 78 215 Q 88 218 92 210 Q 95 200 92 185 Z" fill="#fff" stroke="#ccc" stroke-width="0.8"/>
+        <path d="M 120 178 Q 125 195 122 215 Q 112 218 108 210 Q 105 200 108 185 Z" fill="#fff" stroke="#ccc" stroke-width="0.8"/>
+        <text x="160" y="50" font-family="Bungee, sans-serif" font-size="36" fill="#ffd700" stroke="#c5002a" stroke-width="2" font-weight="900">${expr.exclaim}</text>
+      </svg>
+    `;
   }
 
   // 簡易トースト（lobby.js のトーストを再利用するため #toast を使う）
