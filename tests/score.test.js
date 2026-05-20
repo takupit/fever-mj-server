@@ -69,6 +69,29 @@ test('calculatePointMoves: 割れ目（被ロン者が割れ目）で点棒2倍'
   assert.strictEqual(ware.moves.P2, base.moves.P2 * 2);
 });
 
+test('calculatePointMoves: FEVER 中の和了は点棒2倍', () => {
+  const base = calculatePointMoves({
+    han: 5, dealerId: 'P0', winnerId: 'P1', isTsumo: false, fromPlayer: 'P2',
+  });
+  const fever = calculatePointMoves({
+    han: 5, dealerId: 'P0', winnerId: 'P1', isTsumo: false, fromPlayer: 'P2',
+    isFever: true,
+  });
+  assert.strictEqual(fever.moves.P1, base.moves.P1 * 2);
+  assert.strictEqual(fever.moves.P2, base.moves.P2 * 2);
+});
+
+test('calculatePointMoves: 割れ目+FEVER で点棒4倍', () => {
+  const base = calculatePointMoves({
+    han: 5, dealerId: 'P0', winnerId: 'P1', isTsumo: false, fromPlayer: 'P2',
+  });
+  const both = calculatePointMoves({
+    han: 5, dealerId: 'P0', winnerId: 'P1', isTsumo: false, fromPlayer: 'P2',
+    warePlayer: 'P2', isFever: true,
+  });
+  assert.strictEqual(both.moves.P1, base.moves.P1 * 4);
+});
+
 // ------------------------------------------------------------
 // calculateNotenPenalty
 // ------------------------------------------------------------

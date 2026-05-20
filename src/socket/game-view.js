@@ -92,7 +92,7 @@ function privateHandView(state, playerId) {
 //   pointResult: calculatePointMoves の戻り値
 //   reachBonusGain: リーチ棒を回収した分（和了者のみ +1000×棒数）
 // ============================================================
-function agariView(state, agariResult, winnerId, isTsumo, fromPlayer, pointResult, reachBonusGain) {
+function agariView(state, agariResult, winnerId, isTsumo, fromPlayer, pointResult, reachBonusGain, chipResult, feverActive) {
   const winner = state.players.find((p) => p.id === winnerId);
   const winningTile = isTsumo ? state.drawnTile : (state.lastDiscard ? state.lastDiscard.tile : null);
   return {
@@ -117,6 +117,13 @@ function agariView(state, agariResult, winnerId, isTsumo, fromPlayer, pointResul
     basePoint: pointResult.basePoint,
     pointMoves: pointResult.moves,
     reachBonusGain: reachBonusGain || 0,
+    // チップ移動とその内訳（フェーズ4b step 4 で追加）
+    chipMoves: chipResult ? chipResult.moves : null,
+    chipBreakdown: chipResult ? chipResult.breakdown : null,
+    chipsAfter: state.players.reduce((acc, p) => { acc[p.id] = p.chips; return acc; }, {}),
+    // FEVER の有無を表示用に
+    feverActive: !!feverActive,
+    feverTrigger: winner.feverTrigger || null,
     scoresAfter: state.players.reduce((acc, p) => { acc[p.id] = p.score; return acc; }, {}),
     round: { wind: state.roundWind, hand: state.hand, honba: state.honba },
   };

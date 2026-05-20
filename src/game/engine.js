@@ -761,6 +761,12 @@ class GameEngine {
     return candidates[0].tile;
   }
 
+  // 他のプレイヤーが FEVER 中か（boolean）
+  // フェーズ4b step 4 で他家 FEVER 時の制限判定に使う
+  hasOtherFever(playerId) {
+    return this.state.players.some((p) => p.id !== playerId && p.feverActive);
+  }
+
   // ツモアガリ可能か（boolean）。自分のターン中で drawnTile があるときに使う。
   // フェーズ4b step 3 で your-turn ペイロードに含めるために追加。
   canTsumo(playerId) {

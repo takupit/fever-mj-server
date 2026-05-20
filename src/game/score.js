@@ -45,7 +45,7 @@ function calculateSimpleScore(han, isParent, isTsumo) {
 //   戻り値:
 //     { moves: {P0, P1, P2 のいずれもプラマイ点数}, basePoint, total }
 // ============================================================
-function calculatePointMoves({ han, dealerId, winnerId, isTsumo, fromPlayer = null, warePlayer = null }) {
+function calculatePointMoves({ han, dealerId, winnerId, isTsumo, fromPlayer = null, warePlayer = null, isFever = false }) {
   const isWinnerParent = (winnerId === dealerId);
   const allPlayers = ['P0', 'P1', 'P2'];
   const moves = { P0: 0, P1: 0, P2: 0 };
@@ -61,14 +61,21 @@ function calculatePointMoves({ han, dealerId, winnerId, isTsumo, fromPlayer = nu
 
   const round100 = (n) => Math.ceil(n / 100) * 100;
 
+  // 倍率を計算するヘルパー
+  // 割れ目（和了者 or 支払者が割れ目）→ ×2、FEVER →×2、両方なら ×4
+  const applyMultipliers = (basePay, payerId) => {
+    let pay = basePay;
+    if (warePlayer === winnerId || warePlayer === payerId) pay *= 2;
+    if (isFever) pay *= 2;
+    return pay;
+  };
+
   if (isTsumo) {
     if (isWinnerParent) {
       // 親ツモ: 子全員から basePoint × 2 ずつ
       for (const pid of allPlayers) {
         if (pid === winnerId) continue;
-        let pay = round100(basePoint * 2);
-        // 割れ目: 和了者または支払者が割れ目なら ×2
-        if (warePlayer === winnerId || warePlayer === pid) pay *= 2;
+        const pay = applyMultipliers(round100(basePoint * 2), pid);
         moves[pid] -= pay;
         moves[winnerId] += pay;
       }
@@ -77,8 +84,7 @@ function calculatePointMoves({ han, dealerId, winnerId, isTsumo, fromPlayer = nu
       for (const pid of allPlayers) {
         if (pid === winnerId) continue;
         const isParent = (pid === dealerId);
-        let pay = round100(basePoint * (isParent ? 2 : 1));
-        if (warePlayer === winnerId || warePlayer === pid) pay *= 2;
+        const pay = applyMultipliers(round100(basePoint * (isParent ? 2 : 1)), pid);
         moves[pid] -= pay;
         moves[winnerId] += pay;
       }
@@ -86,8 +92,7 @@ function calculatePointMoves({ han, dealerId, winnerId, isTsumo, fromPlayer = nu
   } else {
     // ロン: discarder が全額支払い
     if (!fromPlayer) throw new Error('ロンには fromPlayer が必須');
-    let pay = round100(basePoint * (isWinnerParent ? 6 : 4));
-    if (warePlayer === winnerId || warePlayer === fromPlayer) pay *= 2;
+    const pay = applyMultipliers(round100(basePoint * (isWinnerParent ? 6 : 4)), fromPlayer);
     moves[fromPlayer] -= pay;
     moves[winnerId] += pay;
   }

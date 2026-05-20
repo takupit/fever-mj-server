@@ -121,23 +121,55 @@
 
   function renderOpponent(rootEl, opponent, isCurrentTurn) {
     rootEl.classList.toggle('current-turn', isCurrentTurn);
-    rootEl.querySelector('.opp-name').textContent = opponent.name;
+    rootEl.classList.toggle('reached', !!opponent.isReached);
+    rootEl.classList.toggle('fever', !!opponent.feverActive);
+    const nameEl = rootEl.querySelector('.opp-name');
+    nameEl.textContent = opponent.name;
+    if (opponent.isReached) nameEl.innerHTML += ' <span class="reach-banner">リーチ</span>';
+    if (opponent.feverActive) nameEl.innerHTML += ' <span class="fever-tag">🎰FEVER</span>';
     rootEl.querySelector('.opp-wind').textContent = WIND_NAMES[opponent.wind] || opponent.wind;
-    rootEl.querySelector('.opp-score').textContent = `${opponent.score}点`;
+    rootEl.querySelector('.opp-score').textContent = `${opponent.score}点 / ${opponent.chips || 0}💎`;
     // 手牌は枚数だけ裏向きで（仕様書セキュリティ 1: 他家手牌の中身は公開しない）
     fillTileBacks(rootEl.querySelector('[data-role="hand"]'), opponent.handCount);
+    // 副露
+    const handRow = rootEl.querySelector('[data-role="hand"]');
+    for (const m of opponent.melds) {
+      const sep = document.createElement('span');
+      sep.style.cssText = 'width:4px; display:inline-block;';
+      handRow.appendChild(sep);
+      for (const t of m.tiles) handRow.appendChild(makeTileEl(t));
+    }
+    // 北抜き数
+    if (opponent.kitaPullsCount > 0) {
+      const kita = document.createElement('span');
+      kita.className = 'kita-mark';
+      kita.textContent = `北×${opponent.kitaPullsCount}`;
+      handRow.appendChild(kita);
+    }
     // 河
     const discardEl = rootEl.querySelector('[data-role="discards"]');
     fillTileRow(discardEl, opponent.discards.map((d) => d.tile));
   }
 
   function renderMe(me, isCurrentTurn) {
-    $('#me-name').textContent = me.name + '（あなた）';
+    let nameHtml = `${escapeHtml(me.name)}（あなた）`;
+    if (me.isReached) nameHtml += ' <span class="reach-banner">リーチ</span>';
+    if (me.feverActive) nameHtml += ' <span class="fever-tag">🎰FEVER</span>';
+    $('#me-name').innerHTML = nameHtml;
     $('#me-wind').textContent = WIND_NAMES[me.wind] || me.wind;
-    $('#me-score').textContent = `${me.score}点`;
+    $('#me-score').textContent = `${me.score}点 / ${me.chips || 0}💎`;
     $('.me-area').classList.toggle('current-turn', isCurrentTurn);
+    $('.me-area').classList.toggle('reached', !!me.isReached);
+    $('.me-area').classList.toggle('fever', !!me.feverActive);
     // 自分の河
     fillTileRow($('#me-discards'), me.discards.map((d) => d.tile));
+    // 自分の北抜き数
+    if (me.kitaPullsCount > 0) {
+      const span = document.createElement('span');
+      span.className = 'kita-mark';
+      span.textContent = `北×${me.kitaPullsCount}`;
+      $('#me-discards').appendChild(span);
+    }
   }
 
   function renderMyHand(hand, drawnTile) {
@@ -221,6 +253,30 @@
     $('#turn-bar').classList.toggle('my-turn', isMyTurn);
   }
 
+  // FEVER バナーの表示制御（仕様書 7. FEVER 視覚演出）
+  function renderFeverBanner(publicState) {
+    const feverPlayer = publicState.players.find((p) => p.feverActive);
+    let banner = document.getElementById('fever-banner');
+    if (!feverPlayer) {
+      if (banner) banner.classList.remove('show');
+      return;
+    }
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'fever-banner';
+      banner.className = 'fever-banner';
+      document.body.appendChild(banner);
+    }
+    const triggerLabel = feverPlayer.feverTrigger === 'double' ? 'W-FEVER!!'
+      : feverPlayer.feverTrigger === 'p7' ? 'FEVER (七筒)'
+      : feverPlayer.feverTrigger === 'm7' ? 'FEVER (七萬)'
+      : 'FEVER';
+    banner.innerHTML = `
+      🎰 <strong>${escapeHtml(feverPlayer.name)}</strong> ${triggerLabel} 🎰
+    `;
+    banner.classList.add('show');
+  }
+
   // 全体再描画
   function rerender() {
     if (!view.publicState) return;
@@ -229,6 +285,7 @@
 
     renderHeader(view.publicState);
     renderDora(view.publicState);
+    renderFeverBanner(view.publicState);
     renderOpponent(
       $('#opp-left'),
       layout.leftOpp,
@@ -302,6 +359,14 @@
     const row = document.createElement('div');
     row.className = 'action-row';
 
+    // 他家 FEVER 中のヒント
+    if (opts.restrictedByFever) {
+      const hint = document.createElement('span');
+      hint.style.cssText = 'color: #ff00aa; font-size: 12px; margin-right: 6px;';
+      hint.textContent = '⚠ FEVER 中：ツモ切り限定';
+      row.appendChild(hint);
+    }
+
     // ツモアガリボタン（最も目立たせる）
     if (opts.options && opts.options.includes('tsumo')) {
       const btn = document.createElement('button');
@@ -312,6 +377,18 @@
           view.discarding = true;
           fm.sendTsumo();
         }
+      });
+      row.appendChild(btn);
+    }
+
+    // 北抜きボタン
+    if (opts.options && opts.options.includes('kita')) {
+      const btn = document.createElement('button');
+      btn.className = 'action-btn kita';
+      btn.textContent = '🟢 北抜き';
+      btn.addEventListener('click', () => {
+        view.discarding = true;
+        fm.sendKita();
       });
       row.appendChild(btn);
     }
@@ -369,12 +446,14 @@
     const bar = document.createElement('div');
     bar.className = 'claim-bar';
 
+    const sourcePlayerId = claim.fromPlayer || claim.discardingPlayer;
     const fromName = view.publicState
-      ? (view.publicState.players.find((p) => p.id === claim.discardingPlayer)?.name || '?')
+      ? (view.publicState.players.find((p) => p.id === sourcePlayerId)?.name || '?')
       : '?';
     const title = document.createElement('div');
     title.className = 'claim-title';
-    title.innerHTML = `${escapeHtml(fromName)} の捨て牌 <span class="claim-target-tile"></span> 鳴きますか？`;
+    const verb = claim.type === 'kita' ? 'が抜いた' : 'の捨て牌';
+    title.innerHTML = `${escapeHtml(fromName)} ${verb} <span class="claim-target-tile"></span> ${claim.type === 'kita' ? '応答しますか？' : '鳴きますか？'}`;
     const tileSlot = title.querySelector('.claim-target-tile');
     tileSlot.appendChild(makeTileEl(claim.tile));
     bar.appendChild(title);
@@ -388,6 +467,31 @@
     row.className = 'action-row';
     row.style.cssText = 'justify-content: center; margin-top: 8px;';
 
+    // 北抜き応答ボタン（kita-claim 専用）
+    if (claim.options.includes('kita-pon')) {
+      const btn = document.createElement('button');
+      btn.className = 'action-btn pon';
+      btn.textContent = '🟠 北ポン';
+      btn.addEventListener('click', () => {
+        view.pendingClaim = null;
+        stopClaimCountdown();
+        rerender();
+        fm.sendKitaPon();
+      });
+      row.appendChild(btn);
+    }
+    if (claim.options.includes('kita-kan')) {
+      const btn = document.createElement('button');
+      btn.className = 'action-btn kan';
+      btn.textContent = '🟣 北カン';
+      btn.addEventListener('click', () => {
+        view.pendingClaim = null;
+        stopClaimCountdown();
+        rerender();
+        fm.sendKitaKan();
+      });
+      row.appendChild(btn);
+    }
     // ロンボタン（最優先で先頭に）
     if (claim.options.includes('ron')) {
       const btn = document.createElement('button');
@@ -508,7 +612,7 @@
     });
 
     // 誰かが何かしたという通知（ログ的に使う・トーストは過剰なので控えめに）
-    fm.on('game:action-result', ({ action, playerId, tile, isTsumogiri }) => {
+    fm.on('game:action-result', ({ action, playerId, tile, isTsumogiri, isAuto }) => {
       if (!view.publicState) return;
       const name = view.publicState.players.find((p) => p.id === playerId)?.name || playerId;
       if (playerId === fm.state.playerId) return; // 自分の行動はトーストしない
@@ -525,6 +629,12 @@
         showToast(`🟣 ${name} が加カン (${label})`, 'info', 1800);
       } else if (action === 'reach') {
         showToast(`🎯 ${name} がリーチ！`, 'ok', 2000);
+      } else if (action === 'kita') {
+        showToast(`🟢 ${name} が北抜き${isAuto ? '（FEVER 強制）' : ''}`, 'info', 1500);
+      } else if (action === 'kita-pon') {
+        showToast(`🟠 ${name} が北ポン！`, 'info', 1800);
+      } else if (action === 'kita-kan') {
+        showToast(`🟣 ${name} が北カン！`, 'info', 1800);
       }
     });
 
@@ -738,6 +848,15 @@
     yakuBlock.appendChild(total);
     card.appendChild(yakuBlock);
 
+    // FEVER 表示
+    if (payload.feverActive) {
+      const fev = document.createElement('div');
+      fev.className = 'agari-fever-badge';
+      const label = payload.feverTrigger === 'double' ? 'W-FEVER!! (点棒×2)' : '🎰 FEVER (点棒×2)';
+      fev.textContent = label;
+      card.appendChild(fev);
+    }
+
     // 点棒移動
     if (payload.pointMoves) {
       const pointsBlock = document.createElement('div');
@@ -762,6 +881,46 @@
         pointsBlock.appendChild(row);
       }
       card.appendChild(pointsBlock);
+    }
+
+    // チップ移動（step 4 で追加）
+    if (payload.chipMoves) {
+      let hasAnyChip = false;
+      for (const pid of ['P0','P1','P2']) {
+        if ((payload.chipMoves[pid] || 0) !== 0) { hasAnyChip = true; break; }
+      }
+      if (hasAnyChip) {
+        const chipBlock = document.createElement('div');
+        chipBlock.className = 'agari-chips';
+        chipBlock.innerHTML = '<div class="chips-title">💎 チップ移動</div>';
+        for (const pid of ['P0','P1','P2']) {
+          const delta = payload.chipMoves[pid] || 0;
+          if (delta === 0) continue;
+          const name = (view.publicState && view.publicState.players.find((p) => p.id === pid)?.name) || pid;
+          const row = document.createElement('div');
+          row.className = 'chip-row';
+          row.innerHTML = `
+            <span class="point-name">${escapeHtml(name)}</span>
+            <span class="point-delta ${delta >= 0 ? 'plus' : 'minus'}">${delta >= 0 ? '+' : ''}${delta}💎</span>
+          `;
+          chipBlock.appendChild(row);
+        }
+        // 内訳（あれば）
+        if (payload.chipBreakdown) {
+          const bd = payload.chipBreakdown;
+          const detail = [];
+          if (bd.rule1) detail.push(`一索/一萬/九萬: +${bd.rule1}`);
+          if (bd.rule2) detail.push(`裏ドラ表示: +${bd.rule2}`);
+          if (bd.rule3) detail.push(`役満祝儀: +${bd.rule3}`);
+          if (detail.length > 0) {
+            const d = document.createElement('div');
+            d.className = 'chip-breakdown';
+            d.textContent = detail.join(' / ');
+            chipBlock.appendChild(d);
+          }
+        }
+        card.appendChild(chipBlock);
+      }
     }
 
     // 裏ドラ表示牌（リーチ和了時のみ）

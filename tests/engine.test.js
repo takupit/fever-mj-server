@@ -527,6 +527,24 @@ test('GameEngine.getRyukyokuTenpaiStatus: 各プレイヤーのテンパイ状�
   assert.ok(p0Status.waits.length > 0);
 });
 
+// ------------------------------------------------------------
+// hasOtherFever（フェーズ4b step 4 で追加）
+// ------------------------------------------------------------
+test('GameEngine.hasOtherFever: 他家が FEVER なら true', () => {
+  const engine = new GameEngine();
+  engine.init();
+  engine.state.players[1].feverActive = true;
+  assert.strictEqual(engine.hasOtherFever('P0'), true);
+  assert.strictEqual(engine.hasOtherFever('P1'), false, '自分の FEVER は他家ではない');
+  assert.strictEqual(engine.hasOtherFever('P2'), true);
+});
+
+test('GameEngine.hasOtherFever: 誰も FEVER でなければ false', () => {
+  const engine = new GameEngine();
+  engine.init();
+  assert.strictEqual(engine.hasOtherFever('P0'), false);
+});
+
 test('GameEngine.nextTurn: P0 → P1 → P2 → P0 のローテーション', () => {
   const engine = new GameEngine();
   engine.init();

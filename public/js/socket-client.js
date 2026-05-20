@@ -167,6 +167,18 @@
     if (!state.socket) return;
     state.socket.emit('game:next-hand', {});
   }
+  function sendKita() {
+    if (!state.socket) return;
+    state.socket.emit('game:kita', {});
+  }
+  function sendKitaPon() {
+    if (!state.socket) return;
+    state.socket.emit('game:kita-pon', {});
+  }
+  function sendKitaKan() {
+    if (!state.socket) return;
+    state.socket.emit('game:kita-kan', {});
+  }
 
   // 他のスクリプトから使える API を window に公開
   window.feverMj = {
@@ -184,6 +196,9 @@
     sendTsumo,
     sendRon,
     sendNextHand,
+    sendKita,
+    sendKitaPon,
+    sendKitaKan,
     clearSession,
     loadSession,
   };

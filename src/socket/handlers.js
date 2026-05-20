@@ -20,6 +20,10 @@ const {
   calculatePointMoves,
   calculateNotenPenalty,
 } = require('../game/score');
+const {
+  calculateChipMoves,
+  calculateChunHatsuBonus,
+} = require('../game/chip');
 
 // 鳴き応答の制限時間（仕様書「13. ポン・ロン応答」より 8 秒）
 const CLAIM_TIMEOUT_MS = 8000;
@@ -160,6 +164,11 @@ function registerHandlers(io, socket, roomManager) {
       if (player.isReached && tile !== engine.state.drawnTile) {
         throw new Error('リーチ後はツモ切りしかできません。');
       }
+      // 検証5: 他家 FEVER 中は未リーチ者もツモ切りのみ
+      if (engine.hasOtherFever(myPlayerId) && !player.isReached
+          && tile !== engine.state.drawnTile) {
+        throw new Error('他家 FEVER 中はツモ切りしかできません。');
+      }
 
       // ツモ切り判定（ツモ牌をそのまま捨てたか）
       const isTsumogiri = tile === engine.state.drawnTile;
@@ -249,6 +258,11 @@ function registerHandlers(io, socket, roomManager) {
         // 自分のターンでの暗カン or 加カン
         if (room.pendingClaim) throw new Error('鳴き応答待ち中です。');
         if (engine.state.currentTurn !== myPlayerId) throw new Error('あなたのターンではありません。');
+        const me = engine.state.players.find((p) => p.id === myPlayerId);
+        // 他家 FEVER 中はカン不可（自分が FEVER 前にリーチ済みなら可）
+        if (engine.hasOtherFever(myPlayerId) && !me.isReached) {
+          throw new Error('他家 FEVER 中はカンできません。');
+        }
         const tile = payload.tile;
         if (!tile) throw new Error('カン対象の牌を指定してください。');
         const doneOk = type === 'ankan'
@@ -313,6 +327,10 @@ function registerHandlers(io, socket, roomManager) {
       if (player.isReached) throw new Error('既にリーチ宣言済みです。');
       if (player.score < 1000) throw new Error('リーチには 1000 点以上必要です。');
       if (engine.state.wall.length < 4) throw new Error('山残り 4 枚未満ではリーチできません。');
+      // 他家 FEVER 中はリーチ不可（仕様書 6. リーチ条件）
+      if (engine.hasOtherFever(myPlayerId)) {
+        throw new Error('他家 FEVER 中はリーチできません。');
+      }
 
       // リーチ宣言 + 打牌
       engine.declareReach(myPlayerId, 'normal', tile);
@@ -347,6 +365,7 @@ function registerHandlers(io, socket, roomManager) {
   // -----------------------------------------------------------------
   // ツモアガリ: game:tsumo
   // 自分のターン中・ツモ牌がある状態で、checkAgariTsumo が成立する場合に成功。
+  // 他家 FEVER 中は不可（自分が FEVER 前にリーチ済みの場合は可）。
   // -----------------------------------------------------------------
   socket.on(C2S.GAME_TSUMO, (_, ack) => {
     try {
@@ -361,6 +380,12 @@ function registerHandlers(io, socket, roomManager) {
       if (engine.state.currentTurn !== myPlayerId) throw new Error('あなたのターンではありません。');
       const drawnTile = engine.state.drawnTile;
       if (!drawnTile) throw new Error('ツモ牌がありません。');
+
+      // 他家 FEVER 中: 未リーチならツモアガリ不可（仕様書 7. FEVER ルール）
+      const me = engine.state.players.find((p) => p.id === myPlayerId);
+      if (engine.hasOtherFever(myPlayerId) && !me.isReached) {
+        throw new Error('他家 FEVER 中はツモアガリできません。');
+      }
 
       const result = engine.checkAgariTsumo(myPlayerId, drawnTile);
       if (!result) throw new Error('役なしのためツモアガリできません（完全先付け）。');
@@ -402,6 +427,72 @@ function registerHandlers(io, socket, roomManager) {
   });
 
   // -----------------------------------------------------------------
+  // 北抜き: game:kita
+  // 自分のターン中、手牌に北（z4）があれば実行可能。
+  // 北抜き → 嶺上ツモ → 他家の北ポン/カン応答チェック → 鳴きあれば実行、
+  // なければ本人のターン継続（次の打牌待ち）。
+  // -----------------------------------------------------------------
+  socket.on(C2S.GAME_KITA, (_, ack) => {
+    try {
+      const room = roomManager.getRoomBySocketId(socket.id);
+      if (!room || !room.gameEngine) throw new Error('対局が開始されていません。');
+      if (room.pendingClaim) throw new Error('鳴き応答待ち中です。');
+      if (room.state === 'hand-end') throw new Error('既に和了/流局済みです。');
+      const playerInfo = roomManager.getPlayerInfoBySocketId(socket.id);
+      if (!playerInfo) throw new Error('プレイヤー情報が見つかりません。');
+      const engine = room.gameEngine;
+      const myPlayerId = playerInfo.playerId;
+      if (engine.state.currentTurn !== myPlayerId) throw new Error('あなたのターンではありません。');
+      if (!engine.hasKita(myPlayerId)) throw new Error('北が手牌にありません。');
+      doKitaInRoom(io, room, myPlayerId, /*isAuto=*/false);
+      if (typeof ack === 'function') ack({ ok: true });
+    } catch (err) {
+      socket.emit(S2C.LOBBY_ERROR, { message: err.message });
+      if (typeof ack === 'function') ack({ ok: false, error: err.message });
+    }
+  });
+
+  // 北抜きへのポン応答: game:kita-pon
+  socket.on(C2S.GAME_KITA_PON, (_, ack) => {
+    try {
+      const room = roomManager.getRoomBySocketId(socket.id);
+      if (!room || !room.pendingClaim || room.pendingClaim.type !== 'kita') {
+        throw new Error('北抜き応答中ではありません。');
+      }
+      const playerInfo = roomManager.getPlayerInfoBySocketId(socket.id);
+      if (!playerInfo) throw new Error('プレイヤー情報が見つかりません。');
+      const eligibility = room.pendingClaim.eligible.get(playerInfo.playerId);
+      if (!eligibility || !eligibility.canPon) throw new Error('北抜きにポンできません。');
+      room.pendingClaim.responses.set(playerInfo.playerId, { action: 'pon' });
+      tryResolveKitaClaim(io, room);
+      if (typeof ack === 'function') ack({ ok: true });
+    } catch (err) {
+      socket.emit(S2C.LOBBY_ERROR, { message: err.message });
+      if (typeof ack === 'function') ack({ ok: false, error: err.message });
+    }
+  });
+
+  // 北抜きへのカン応答: game:kita-kan
+  socket.on(C2S.GAME_KITA_KAN, (_, ack) => {
+    try {
+      const room = roomManager.getRoomBySocketId(socket.id);
+      if (!room || !room.pendingClaim || room.pendingClaim.type !== 'kita') {
+        throw new Error('北抜き応答中ではありません。');
+      }
+      const playerInfo = roomManager.getPlayerInfoBySocketId(socket.id);
+      if (!playerInfo) throw new Error('プレイヤー情報が見つかりません。');
+      const eligibility = room.pendingClaim.eligible.get(playerInfo.playerId);
+      if (!eligibility || !eligibility.canKan) throw new Error('北抜きにカンできません。');
+      room.pendingClaim.responses.set(playerInfo.playerId, { action: 'kan' });
+      tryResolveKitaClaim(io, room);
+      if (typeof ack === 'function') ack({ ok: true });
+    } catch (err) {
+      socket.emit(S2C.LOBBY_ERROR, { message: err.message });
+      if (typeof ack === 'function') ack({ ok: false, error: err.message });
+    }
+  });
+
+  // -----------------------------------------------------------------
   // 次局へ: game:next-hand
   // アガリ/流局後のアガリ画面で誰かが「次へ」を押した時に呼ばれる。
   // 連荘判定 → 親流れ判定 → 次局開始 or 終局通知。
@@ -425,7 +516,7 @@ function registerHandlers(io, socket, roomManager) {
   });
 
   // -----------------------------------------------------------------
-  // スキップ: game:skip（鳴き応答を見送る）
+  // スキップ: game:skip（鳴き応答を見送る・北抜き応答にも対応）
   // -----------------------------------------------------------------
   socket.on(C2S.GAME_SKIP, (_, ack) => {
     try {
@@ -436,7 +527,11 @@ function registerHandlers(io, socket, roomManager) {
       const claim = room.pendingClaim;
       if (!claim.eligible.has(playerInfo.playerId)) return;
       claim.responses.set(playerInfo.playerId, { action: 'skip' });
-      tryResolveClaim(io, room);
+      if (claim.type === 'kita') {
+        tryResolveKitaClaim(io, room);
+      } else {
+        tryResolveClaim(io, room);
+      }
       if (typeof ack === 'function') ack({ ok: true });
     } catch (err) {
       socket.emit(S2C.LOBBY_ERROR, { message: err.message });
@@ -498,6 +593,18 @@ function startTurnFor(io, room, playerId) {
     return;
   }
 
+  // FEVER 強制北抜き: 他家 FEVER 中 + 自分が未リーチ + 手牌に北があれば自動実行
+  const playerNow = engine.state.players.find((p) => p.id === playerId);
+  if (engine.hasOtherFever(playerId) && !playerNow.isReached && engine.hasKita(playerId)) {
+    // 公開状態を一度更新してから自動北抜き
+    io.to(roomChannel(room.id)).emit(
+      S2C.GAME_STATE_UPDATE,
+      publicGameView(engine.state)
+    );
+    doKitaInRoom(io, room, playerId, /*isAuto=*/true);
+    return;
+  }
+
   // ツモ済の手牌を本人にだけ
   const roomPlayer = room.players.find((p) => p.id === playerId);
   if (roomPlayer && roomPlayer.socketId) {
@@ -519,27 +626,38 @@ function startTurnFor(io, room, playerId) {
 }
 
 // 自分のターンで使える選択肢をまとめたペイロードを作る
-// step 4 で kita を追加予定
 function buildYourTurnPayload(engine, playerId) {
+  const player = engine.state.players.find((p) => p.id === playerId);
+  const otherFever = engine.hasOtherFever(playerId);
+  // 他家 FEVER 中・自分未リーチなら選択肢が大きく制限される
+  const restrictedByFever = otherFever && !player.isReached;
+
   const options = ['discard'];
   const ankanCandidates = engine.getAnkanCandidates(playerId);
   const kakanCandidates = engine.getKakanCandidates(playerId);
   const canReach = engine.canReach(playerId);
   const reachOptions = canReach ? engine.getReachOptions(playerId) : [];
   const canTsumo = engine.canTsumo(playerId);
+  const canKita = engine.hasKita(playerId);
 
-  if (ankanCandidates.length > 0) options.push('ankan');
-  if (kakanCandidates.length > 0) options.push('kakan');
-  if (canReach) options.push('reach');
-  if (canTsumo) options.push('tsumo');
+  if (!restrictedByFever) {
+    if (ankanCandidates.length > 0) options.push('ankan');
+    if (kakanCandidates.length > 0) options.push('kakan');
+    if (canReach) options.push('reach');
+    if (canTsumo) options.push('tsumo');
+  }
+  // 北抜きは FEVER 制限中でも可（むしろ強制的に startTurnFor で実行される）
+  if (canKita) options.push('kita');
 
   return {
     drawnTile: engine.state.drawnTile,
     options,
-    ankanCandidates,
-    kakanCandidates,
-    reachOptions, // [{ discardIdx, discardTile, isFuriten }, ...]
-    canTsumo,
+    ankanCandidates: restrictedByFever ? [] : ankanCandidates,
+    kakanCandidates: restrictedByFever ? [] : kakanCandidates,
+    reachOptions: restrictedByFever ? [] : reachOptions,
+    canTsumo: restrictedByFever ? false : canTsumo,
+    canKita,
+    restrictedByFever,
   };
 }
 
@@ -754,9 +872,10 @@ function buildYourTurnPayloadAfterCall(engine, playerId) {
 // -----------------------------------------------------------------
 // アガリ確定処理（ツモ・ロン共通）
 //   1. リーチ棒を回収して和了者の点数に加算
-//   2. 点棒移動を計算して各プレイヤーに反映
-//   3. game:agari を全員に送信
-//   4. room.state = 'hand-end' にして、room.lastResult を保存
+//   2. 点棒移動を計算して各プレイヤーに反映（FEVER の場合は ×2 倍）
+//   3. チップ移動を計算して各プレイヤーに反映
+//   4. game:agari を全員に送信
+//   5. room.state = 'hand-end' にして、room.lastResult を保存
 // -----------------------------------------------------------------
 function finalizeAgari(io, room, { agariResult, winnerId, isTsumo, fromPlayer }) {
   const engine = room.gameEngine;
@@ -765,7 +884,13 @@ function finalizeAgari(io, room, { agariResult, winnerId, isTsumo, fromPlayer })
   }
   room.pendingClaim = null;
 
-  // 点棒移動を計算
+  // 和了者の状態を取得（点棒/チップ計算でも使う）
+  const winner = engine.state.players.find((p) => p.id === winnerId);
+  const isFever = !!(winner && winner.feverActive);
+  const wasReached = !!(winner && winner.isReached);
+  const wasIpatsu = !!(winner && winner.ipatsuActive);
+
+  // 点棒移動を計算（FEVER で ×2 倍）
   const han = agariResult.yakuResult.totalHan;
   const pointResult = calculatePointMoves({
     han,
@@ -774,6 +899,7 @@ function finalizeAgari(io, room, { agariResult, winnerId, isTsumo, fromPlayer })
     isTsumo,
     fromPlayer,
     warePlayer: engine.state.warePlayer,
+    isFever,
   });
 
   // 点数を実際に動かす
@@ -782,11 +908,24 @@ function finalizeAgari(io, room, { agariResult, winnerId, isTsumo, fromPlayer })
   }
   // リーチ棒を和了者が回収
   const reachBonus = engine.state.reachSticks * 1000;
-  const winner = engine.state.players.find((p) => p.id === winnerId);
   if (winner) winner.score += reachBonus;
   // リーチ棒は使い切ったので 0 にリセット
   const consumedReachSticks = engine.state.reachSticks;
   engine.state.reachSticks = 0;
+
+  // チップ移動を計算して反映（① 一索/一萬/九萬、② 裏ドラ、③ 役満）
+  const chipResult = calculateChipMoves({
+    state: engine.state,
+    agariResult,
+    winnerId,
+    isTsumo,
+    fromPlayer,
+    isReached: wasReached,
+    ipatsuActive: wasIpatsu,
+  });
+  for (const p of engine.state.players) {
+    p.chips += chipResult.moves[p.id] || 0;
+  }
 
   // アガリ画面用のビューを構築して全員にブロードキャスト
   const view = agariView(
@@ -796,7 +935,9 @@ function finalizeAgari(io, room, { agariResult, winnerId, isTsumo, fromPlayer })
     isTsumo,
     fromPlayer,
     pointResult,
-    reachBonus
+    reachBonus,
+    chipResult,
+    isFever
   );
   io.to(roomChannel(room.id)).emit(S2C.GAME_AGARI, view);
 
@@ -818,7 +959,192 @@ function finalizeAgari(io, room, { agariResult, winnerId, isTsumo, fromPlayer })
     consumedReachSticks,
   };
 
-  console.log(`[アガリ] roomId=${room.id} winner=${winnerId} ${isTsumo ? 'ツモ' : `ロン from ${fromPlayer}`} han=${han} basePoint=${pointResult.basePoint}`);
+  console.log(`[アガリ] roomId=${room.id} winner=${winnerId} ${isTsumo ? 'ツモ' : `ロン from ${fromPlayer}`} han=${han} basePoint=${pointResult.basePoint} FEVER=${isFever}`);
+}
+
+// -----------------------------------------------------------------
+// 北抜きを実行 → 嶺上ツモ → 鳴き応答チェック（kita-claim）
+//   1. engine.doKitaPull で北を抜く（嶺上ツモも実行）
+//   2. 中・發ボーナス判定（リーチ後一発時のみ）
+//   3. game:action-result で全員に通知
+//   4. 他家の北抜き応答（pon/kan）をチェック → あれば kita-claim 開始
+//   5. 鳴きがなければ本人のターン継続
+// isAuto=true なら FEVER 強制北抜き経由（鳴き応答後も北が残ってればまた抜く）
+// -----------------------------------------------------------------
+function doKitaInRoom(io, room, playerId, isAuto) {
+  const engine = room.gameEngine;
+  const rinshanTile = engine.doKitaPull(playerId);
+  if (rinshanTile === null) return false;
+
+  // 中・發ボーナス判定（リーチ後一発ツモのみ）→ ただし北抜き時の rinshan ツモには
+  // 適用しない（仕様書 8. は「リーチ後の一発ツモ」を指す）。北抜きは独立処理。
+  // → ここでは何もしない。
+
+  io.to(roomChannel(room.id)).emit(S2C.GAME_ACTION_RESULT, {
+    action: 'kita',
+    playerId,
+    tile: 'z4',
+    isAuto,
+  });
+  io.to(roomChannel(room.id)).emit(
+    S2C.GAME_STATE_UPDATE,
+    publicGameView(engine.state)
+  );
+
+  // 他家の北抜き応答チェック
+  const kitaEligible = new Map();
+  for (const p of engine.state.players) {
+    if (p.id === playerId) continue;
+    const canPon = engine.canPonOnKita(p.id);
+    const canKan = engine.canKanOnKita(p.id);
+    if (canPon || canKan) kitaEligible.set(p.id, { canPon, canKan });
+  }
+
+  if (kitaEligible.size === 0) {
+    // 鳴きなし → 本人ターン継続
+    continueAfterKita(io, room, playerId, isAuto);
+    return true;
+  }
+
+  room.pendingClaim = {
+    type: 'kita',
+    fromPlayerId: playerId,
+    isAuto,
+    eligible: kitaEligible,
+    responses: new Map(),
+    timeoutId: null,
+  };
+
+  for (const [pid, opt] of kitaEligible) {
+    const claimOptions = [];
+    if (opt.canPon) claimOptions.push('kita-pon');
+    if (opt.canKan) claimOptions.push('kita-kan');
+    claimOptions.push('skip');
+    const rp = room.players.find((p) => p.id === pid);
+    if (rp && rp.socketId) {
+      io.to(rp.socketId).emit(S2C.GAME_WAITING_CLAIM, {
+        type: 'kita',
+        fromPlayer: playerId,
+        tile: 'z4',
+        options: claimOptions,
+        timeoutMs: CLAIM_TIMEOUT_MS,
+      });
+    }
+  }
+
+  room.pendingClaim.timeoutId = setTimeout(() => {
+    resolveKitaClaim(io, room);
+  }, CLAIM_TIMEOUT_MS);
+
+  console.log(`[北抜き応答待ち] roomId=${room.id} 抜いた人=${playerId} 対象=${[...kitaEligible.keys()].join(',')}`);
+  return true;
+}
+
+function tryResolveKitaClaim(io, room) {
+  const claim = room.pendingClaim;
+  if (!claim || claim.type !== 'kita') return;
+  const allResponded = [...claim.eligible.keys()].every((pid) => claim.responses.has(pid));
+  if (allResponded) {
+    if (claim.timeoutId) clearTimeout(claim.timeoutId);
+    resolveKitaClaim(io, room);
+  }
+}
+
+function resolveKitaClaim(io, room) {
+  const claim = room.pendingClaim;
+  if (!claim || claim.type !== 'kita') return;
+  if (claim.timeoutId) clearTimeout(claim.timeoutId);
+  room.pendingClaim = null;
+  const engine = room.gameEngine;
+
+  // 優先順位: kan > pon
+  const order = ['P0', 'P1', 'P2'];
+  const fromIdx = order.indexOf(claim.fromPlayerId);
+  const sortedPids = [order[(fromIdx + 1) % 3], order[(fromIdx + 2) % 3]]
+    .filter((pid) => claim.eligible.has(pid));
+
+  let winner = null;
+  for (const pid of sortedPids) {
+    const resp = claim.responses.get(pid);
+    if (resp && resp.action === 'kan') { winner = { playerId: pid, action: 'kan' }; break; }
+  }
+  if (!winner) {
+    for (const pid of sortedPids) {
+      const resp = claim.responses.get(pid);
+      if (resp && resp.action === 'pon') { winner = { playerId: pid, action: 'pon' }; break; }
+    }
+  }
+
+  if (!winner) {
+    // 誰も鳴かなかった → 抜いた本人のターン継続
+    continueAfterKita(io, room, claim.fromPlayerId, claim.isAuto);
+    return;
+  }
+
+  // 北ポン or 北カンを実行
+  if (winner.action === 'pon') {
+    engine.doPonOnKita(winner.playerId, claim.fromPlayerId);
+  } else {
+    engine.doKanOnKita(winner.playerId, claim.fromPlayerId);
+  }
+  io.to(roomChannel(room.id)).emit(S2C.GAME_ACTION_RESULT, {
+    action: winner.action === 'pon' ? 'kita-pon' : 'kita-kan',
+    playerId: winner.playerId,
+    fromPlayer: claim.fromPlayerId,
+    tile: 'z4',
+  });
+  // 鳴いた本人に手牌＋打牌可能通知
+  const claimerRoomPlayer = room.players.find((p) => p.id === winner.playerId);
+  if (claimerRoomPlayer && claimerRoomPlayer.socketId) {
+    io.to(claimerRoomPlayer.socketId).emit(
+      S2C.GAME_YOUR_HAND,
+      privateHandView(engine.state, winner.playerId)
+    );
+    if (winner.action === 'kan') {
+      // 北カンは嶺上ツモが必要
+      const rinshanTile = engine.drawRinshan(winner.playerId);
+      io.to(claimerRoomPlayer.socketId).emit(
+        S2C.GAME_YOUR_HAND,
+        privateHandView(engine.state, winner.playerId)
+      );
+    }
+    io.to(claimerRoomPlayer.socketId).emit(
+      S2C.GAME_YOUR_TURN,
+      buildYourTurnPayloadAfterCall(engine, winner.playerId)
+    );
+  }
+  io.to(roomChannel(room.id)).emit(
+    S2C.GAME_STATE_UPDATE,
+    publicGameView(engine.state)
+  );
+  console.log(`[北抜き応答成立] roomId=${room.id} ${winner.action}=${winner.playerId} from=${claim.fromPlayerId}`);
+}
+
+// 北抜き後、鳴きが入らなかった場合に本人のターンを継続
+function continueAfterKita(io, room, playerId, isAuto) {
+  const engine = room.gameEngine;
+  const player = engine.state.players.find((p) => p.id === playerId);
+  // FEVER 強制経由で、まだ手牌に北が残っていれば再度北抜き
+  if (isAuto && engine.hasOtherFever(playerId) && !player.isReached && engine.hasKita(playerId)) {
+    doKitaInRoom(io, room, playerId, /*isAuto=*/true);
+    return;
+  }
+  // 通常: 本人にツモ済の手牌+ターン通知
+  const roomPlayer = room.players.find((p) => p.id === playerId);
+  if (roomPlayer && roomPlayer.socketId) {
+    io.to(roomPlayer.socketId).emit(
+      S2C.GAME_YOUR_HAND,
+      privateHandView(engine.state, playerId)
+    );
+    io.to(roomPlayer.socketId).emit(
+      S2C.GAME_YOUR_TURN,
+      buildYourTurnPayload(engine, playerId)
+    );
+  }
+  io.to(roomChannel(room.id)).emit(
+    S2C.GAME_STATE_UPDATE,
+    publicGameView(engine.state)
+  );
 }
 
 // -----------------------------------------------------------------
