@@ -214,6 +214,12 @@ class RoomManager {
     return this.rooms.get(link.roomId) || null;
   }
 
+  // ソケットID から { roomId, playerId, token } を取得（無ければ null）
+  // 各 game:* ハンドラで「このソケットの主はどの席か」を特定するために使う。
+  getPlayerInfoBySocketId(socketId) {
+    return this.socketToRoom.get(socketId) || null;
+  }
+
   // 公開してよい情報だけを抜き出す（他人のトークン・ソケットID は隠す）
   publicView(room) {
     return {
