@@ -220,6 +220,36 @@ class RoomManager {
     return this.socketToRoom.get(socketId) || null;
   }
 
+  // トークン → { room, player } を取得（無ければ null）
+  // フェーズ6 で再接続時に使用。socketToRoom が消えてもこちらは残るので
+  // 切断後の復帰判定が可能。
+  findPlayerByToken(token) {
+    const link = this.tokenToPlayer.get(token);
+    if (!link) return null;
+    const room = this.rooms.get(link.roomId);
+    if (!room) return null;
+    const player = room.players.find((p) => p.id === link.playerId);
+    if (!player) return null;
+    return { room, player };
+  }
+
+  // トークン経由で新しい socketId を割り当て直す（再接続用）
+  // 戻り値: { room, player } または null（トークンが無効）
+  reattachSocketByToken(token, newSocketId) {
+    const found = this.findPlayerByToken(token);
+    if (!found) return null;
+    const { room, player } = found;
+
+    // 旧 socketId のマッピングが残っていれば消す
+    if (player.socketId && player.socketId !== newSocketId) {
+      this.socketToRoom.delete(player.socketId);
+    }
+    player.socketId = newSocketId;
+    player.connected = true;
+    this.socketToRoom.set(newSocketId, { roomId: room.id, playerId: player.id, token });
+    return { room, player };
+  }
+
   // 公開してよい情報だけを抜き出す（他人のトークン・ソケットID は隠す）
   publicView(room) {
     return {

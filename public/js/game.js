@@ -1086,6 +1086,24 @@
       hideRyukyokuOverlay();
     });
 
+    // フェーズ6: 切断・再接続・CPU 代打の通知
+    fm.on('game:player-disconnected', ({ playerId, name, willCpuTakeoverInMs }) => {
+      if (playerId === fm.state.playerId) return; // 自分への通知は意味がない
+      const sec = Math.round((willCpuTakeoverInMs || 30000) / 1000);
+      showToast(`⚠ ${name} さんが切断（${sec}秒以内に復帰しなければ CPU 代打）`, 'error', 3000);
+    });
+    fm.on('game:player-reconnected', ({ playerId, name }) => {
+      if (playerId === fm.state.playerId) return;
+      showToast(`✅ ${name} さんが復帰しました`, 'ok', 2000);
+    });
+    fm.on('game:cpu-takeover', ({ playerId, name }) => {
+      if (playerId === fm.state.playerId) {
+        showToast('⚠ あなたは CPU 代打になりました', 'error', 3000);
+      } else {
+        showToast(`🤖 ${name} さんは CPU 代打中`, 'info', 2500);
+      }
+    });
+
     // 対局終了
     fm.on('game:game-end', (payload) => {
       view.canDiscard = false;

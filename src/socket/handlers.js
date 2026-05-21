@@ -30,6 +30,8 @@ const CLAIM_TIMEOUT_MS = 8000;
 // CPU の思考時間（人間に動きが見える程度の遅延）
 const CPU_THINK_MS_MIN = 800;
 const CPU_THINK_MS_MAX = 1400;
+// 切断後の再接続猶予時間（仕様書「7. 切断検知」より 30 秒）
+const RECONNECT_GRACE_MS = 30000;
 
 // クライアントから受け取った値を安全に正規化（trim・長さ制限）
 function sanitize(payload) {
@@ -591,6 +593,95 @@ function registerHandlers(io, socket, roomManager) {
   // -----------------------------------------------------------------
   socket.on('disconnect', (reason) => {
     handleLeave(io, socket, roomManager, `切断: ${reason}`);
+  });
+
+  // -----------------------------------------------------------------
+  // 再接続: game:reconnect
+  // クライアントが localStorage に保存していたトークンで席を取り戻す。
+  // 30 秒の猶予内ならゲーム続行・タイマーをキャンセル。
+  // 既に CPU 代打が始まっていれば人間に戻す。
+  // -----------------------------------------------------------------
+  socket.on(C2S.GAME_RECONNECT, (payload, ack) => {
+    try {
+      const token = payload && payload.token;
+      if (!token) throw new Error('再接続トークンがありません');
+      const found = roomManager.reattachSocketByToken(token, socket.id);
+      if (!found) throw new Error('そのトークンの席は無効化されています');
+      const { room, player } = found;
+
+      socket.join(roomChannel(room.id));
+
+      // CPU 代打タイマーが回っていればキャンセル
+      if (room.cpuTakeoverTimers && room.cpuTakeoverTimers[player.id]) {
+        clearTimeout(room.cpuTakeoverTimers[player.id]);
+        delete room.cpuTakeoverTimers[player.id];
+      }
+
+      // 既に CPU 代打が始まっていたら人間に戻す
+      if (room.gameEngine) {
+        const enginePlayer = room.gameEngine.state.players.find((p) => p.id === player.id);
+        if (enginePlayer && enginePlayer.isCpu && !player.isCpu) {
+          enginePlayer.isCpu = false;
+        }
+      }
+      player.cpuTakeover = false;
+
+      // 再接続成功通知（lobby:room-joined と同形式で本人に返す）
+      socket.emit(S2C.LOBBY_ROOM_JOINED, {
+        roomId: room.id,
+        playerId: player.id,
+        token,
+        room: roomManager.publicView(room),
+        reconnected: true,
+      });
+
+      // 対局中ならゲーム状態も再送
+      if (room.gameEngine) {
+        socket.emit(S2C.GAME_START, {
+          roomId: room.id,
+          players: room.gameEngine.state.players.map((p) => ({ id: p.id, name: p.name, wind: p.wind })),
+          dealerId: room.gameEngine.state.dealerId,
+          warePlayer: room.gameEngine.state.warePlayer,
+        });
+        socket.emit(S2C.GAME_YOUR_HAND, privateHandView(room.gameEngine.state, player.id));
+        socket.emit(S2C.GAME_STATE_UPDATE, publicGameView(room.gameEngine.state));
+
+        // 自分のターン中なら your-turn も再送
+        if (room.gameEngine.state.currentTurn === player.id && !room.pendingClaim) {
+          socket.emit(S2C.GAME_YOUR_TURN, buildYourTurnPayload(room.gameEngine, player.id));
+        }
+        // 鳴き応答待ち中で自分が対象なら waiting-claim も再送
+        if (room.pendingClaim && room.pendingClaim.eligible && room.pendingClaim.eligible.has(player.id)) {
+          const opt = room.pendingClaim.eligible.get(player.id);
+          const claimOptions = [];
+          if (opt.canRon) claimOptions.push('ron');
+          if (opt.canPon) claimOptions.push('pon');
+          if (opt.canMinkan) claimOptions.push('kan');
+          if (opt.canKan) claimOptions.push('kita-kan');
+          claimOptions.push('skip');
+          socket.emit(S2C.GAME_WAITING_CLAIM, {
+            type: room.pendingClaim.type || null,
+            discardingPlayer: room.pendingClaim.discarderId || null,
+            fromPlayer: room.pendingClaim.fromPlayerId || null,
+            tile: room.pendingClaim.tile || 'z4',
+            options: claimOptions,
+            timeoutMs: CLAIM_TIMEOUT_MS, // 概算（残時間は厳密でないが許容）
+          });
+        }
+      }
+
+      // 他メンバーに「復帰したよ」通知
+      socket.to(roomChannel(room.id)).emit(S2C.GAME_PLAYER_RECONNECTED, {
+        playerId: player.id,
+        name: player.name,
+      });
+      console.log(`[再接続成功] roomId=${room.id} player=${player.id} (${player.name})`);
+
+      if (typeof ack === 'function') ack({ ok: true });
+    } catch (err) {
+      socket.emit(S2C.LOBBY_ERROR, { message: err.message });
+      if (typeof ack === 'function') ack({ ok: false, error: err.message });
+    }
   });
 }
 
@@ -1510,7 +1601,7 @@ function broadcastHandStart(io, room) {
   );
 }
 
-// 退室共通処理: 残メンバーに通知 or 部屋削除
+// 退室共通処理: 残メンバーに通知 or 部屋削除 or CPU 代打タイマー起動
 function handleLeave(io, socket, roomManager, reason) {
   const result = roomManager.leaveRoom(socket.id);
   if (!result) return;
@@ -1522,11 +1613,68 @@ function handleLeave(io, socket, roomManager, reason) {
   }
   if (!room) return;
 
+  // 対局中（in-game / hand-end）の切断: CPU 代打タイマーを起動
+  if (room.state === 'in-game' || room.state === 'hand-end') {
+    io.to(roomChannel(room.id)).emit(S2C.GAME_PLAYER_DISCONNECTED, {
+      playerId: removedPlayer.id,
+      name: removedPlayer.name,
+      willCpuTakeoverInMs: RECONNECT_GRACE_MS,
+    });
+    scheduleCpuTakeover(io, room, removedPlayer.id, roomManager);
+    console.log(`[切断] roomId=${room.id} player=${removedPlayer.name} 30秒以内に再接続無ければ CPU 代打 / 理由=${reason}`);
+    return;
+  }
+
+  // 待機中の退室: ロビー通知
   io.to(roomChannel(room.id)).emit(S2C.LOBBY_PLAYER_LEFT, {
     playerId: removedPlayer.id,
     room: roomManager.publicView(room),
   });
   console.log(`[退室] roomId=${room.id} player=${removedPlayer.name} (${removedPlayer.id}) 理由=${reason}`);
+}
+
+// 30 秒後に CPU 代打を確定するタイマー
+function scheduleCpuTakeover(io, room, playerId, roomManager) {
+  if (!room.cpuTakeoverTimers) room.cpuTakeoverTimers = {};
+  // 既存のタイマーがあればキャンセル（再度切断された場合のため）
+  if (room.cpuTakeoverTimers[playerId]) clearTimeout(room.cpuTakeoverTimers[playerId]);
+  room.cpuTakeoverTimers[playerId] = setTimeout(() => {
+    delete room.cpuTakeoverTimers[playerId];
+    applyCpuTakeover(io, room, playerId, roomManager);
+  }, RECONNECT_GRACE_MS);
+}
+
+// CPU 代打を実際に開始する（30 秒経過 or 即時で）
+function applyCpuTakeover(io, room, playerId, roomManager) {
+  const engine = room.gameEngine;
+  if (!engine) return;
+  const enginePlayer = engine.state.players.find((p) => p.id === playerId);
+  if (!enginePlayer) return;
+  // 既に CPU 代打中なら何もしない
+  if (enginePlayer.isCpu) return;
+
+  enginePlayer.isCpu = true;
+  const roomPlayer = room.players.find((p) => p.id === playerId);
+  if (roomPlayer) {
+    roomPlayer.cpuTakeover = true;
+    // トークンを無効化（30秒過ぎたらもう復帰不可・別席が空くまで）
+    if (roomPlayer.token) roomManager.invalidateToken(roomPlayer.token);
+  }
+
+  io.to(roomChannel(room.id)).emit(S2C.GAME_CPU_TAKEOVER, {
+    playerId,
+    name: enginePlayer.name,
+  });
+  console.log(`[CPU 代打開始] roomId=${room.id} player=${playerId} (${enginePlayer.name})`);
+
+  // 自分のターンで止まっていたら即 CPU 行動
+  if (engine.state.currentTurn === playerId && !room.pendingClaim && room.state === 'in-game') {
+    scheduleCpuTurn(io, room, playerId);
+  }
+  // 鳴き応答中で対象なら CPU 判断
+  if (room.pendingClaim && room.pendingClaim.eligible && room.pendingClaim.eligible.has(playerId)) {
+    setTimeout(() => decideCpuClaim(io, room, playerId), 200);
+  }
 }
 
 module.exports = { registerHandlers };

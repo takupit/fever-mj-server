@@ -160,8 +160,14 @@
       toast(`部屋を作りました（合言葉: ${escapeHtml($('#create-password').value)}）`);
     });
 
-    // 部屋参加成功
-    fm.on('lobby:room-joined', ({ room }) => {
+    // 部屋参加成功（新規参加 / 再接続 両方扱う）
+    fm.on('lobby:room-joined', ({ room, reconnected }) => {
+      if (reconnected) {
+        // フェーズ6: 再接続時は対局画面に直接戻る
+        showView('view-game');
+        toast('再接続しました', 'ok');
+        return;
+      }
       $('#waiting-title').textContent = '対局メンバー待ち';
       updateWaitingView(room, fm.state.playerId);
       showView('view-waiting');

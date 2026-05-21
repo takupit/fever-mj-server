@@ -77,6 +77,11 @@
     socket.on('connect', () => {
       state.connected = true;
       emitLocal('connected', { socketId: socket.id });
+      // フェーズ6: 自動再接続を試みる（localStorage にトークンが残っていれば）
+      const session = loadSession();
+      if (session && session.token && session.roomId) {
+        socket.emit('game:reconnect', { token: session.token });
+      }
     });
     socket.on('disconnect', (reason) => {
       state.connected = false;
@@ -107,6 +112,10 @@
       'game:hand-end',
       'game:game-end',
       'game:tobi',
+      // フェーズ6: 切断・再接続・CPU 代打通知
+      'game:player-disconnected',
+      'game:player-reconnected',
+      'game:cpu-takeover',
     ].forEach((evt) => {
       socket.on(evt, (payload) => {
         // 部屋情報を受け取ったらクライアント側状態を更新
@@ -171,6 +180,11 @@
     if (!state.socket) return;
     state.socket.emit('game:next-hand', {});
   }
+  // フェーズ6: 明示的に再接続を要求（自動再接続と同じ動作）
+  function sendReconnect(token) {
+    if (!state.socket) return;
+    state.socket.emit('game:reconnect', { token });
+  }
   function sendKita() {
     if (!state.socket) return;
     state.socket.emit('game:kita', {});
@@ -204,6 +218,7 @@
     sendKita,
     sendKitaPon,
     sendKitaKan,
+    sendReconnect,
     clearSession,
     loadSession,
   };
