@@ -1576,10 +1576,31 @@
       <h2>あそびかたを選ぶ</h2>
       <button id="btn-create" class="btn btn-primary">🆕 部屋を作る</button>
       <button id="btn-join" class="btn btn-secondary">🚪 部屋に入る</button>
+      <button id="btn-solo" class="btn btn-secondary" style="border-color: rgba(102,187,106,0.5); color: #66bb6a;">
+        🤖 ソロ練習（CPU 2 体と対戦）
+      </button>
     </div>
     <div class="hint">
       「部屋を作る」を選んだ人が <strong>合言葉</strong> を決めて、<br>
-      他の2人にその合言葉を伝えて参加してもらいます。
+      他の2人にその合言葉を伝えて参加してもらいます。<br>
+      <span style="color: #66bb6a;">ソロ練習</span>は CPU と1人で練習できます。
+    </div>
+  </section>
+
+  <!-- ビュー1.5: ソロ練習用の名前入力 -->
+  <section id="view-solo" class="view">
+    <div class="panel">
+      <h2>🤖 ソロ練習</h2>
+      <label class="field">
+        <span>あなたの名前（20文字以内）</span>
+        <input id="solo-name" type="text" maxlength="20" placeholder="例: たくみ" autocomplete="off">
+      </label>
+      <button id="solo-submit" class="btn btn-primary">対局開始 → CPU 2 体と</button>
+      <button class="btn btn-secondary btn-back">← 戻る</button>
+    </div>
+    <div class="hint">
+      合言葉なしで、すぐに対局が始まります。<br>
+      CPU が打牌・鳴き・リーチを自動で行います。
     </div>
   </section>
 

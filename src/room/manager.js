@@ -78,6 +78,55 @@ class RoomManager {
     return { room, player, token, playerId };
   }
 
+  // ソロ練習部屋を作成（人間1人＋CPU2人）。即対局開始用。
+  // 合言葉は不要、他人は参加できない。
+  createSoloRoom({ name, socketId }) {
+    if (!name) throw new Error('名前を入力してください。');
+
+    const roomId = this.idGen();
+    const token = this.idGen();
+
+    const humanPlayer = {
+      id: PLAYER_IDS[0], // P0 が人間
+      socketId,
+      name,
+      token,
+      connected: true,
+      isCpu: false,
+    };
+    const cpu1 = {
+      id: PLAYER_IDS[1],
+      socketId: null,
+      name: 'CPU 1',
+      token: null,
+      connected: true,
+      isCpu: true,
+    };
+    const cpu2 = {
+      id: PLAYER_IDS[2],
+      socketId: null,
+      name: 'CPU 2',
+      token: null,
+      connected: true,
+      isCpu: true,
+    };
+
+    const room = {
+      id: roomId,
+      password: `__solo__${roomId}`, // 他人は参加不可（合言葉一致しないユニーク値）
+      isSolo: true,
+      createdAt: this.now(),
+      state: 'starting',
+      players: [humanPlayer, cpu1, cpu2],
+    };
+
+    this.rooms.set(roomId, room);
+    this.socketToRoom.set(socketId, { roomId, playerId: humanPlayer.id, token });
+    this.tokenToPlayer.set(token, { roomId, playerId: humanPlayer.id });
+
+    return { room, player: humanPlayer, token, playerId: humanPlayer.id };
+  }
+
   // 既存の部屋に参加。合言葉一致する待機部屋がなければエラー。
   // 3人揃ったら state を 'starting' に遷移。
   joinRoom({ password, name, socketId }) {

@@ -27,6 +27,9 @@ const {
 
 // 鳴き応答の制限時間（仕様書「13. ポン・ロン応答」より 8 秒）
 const CLAIM_TIMEOUT_MS = 8000;
+// CPU の思考時間（人間に動きが見える程度の遅延）
+const CPU_THINK_MS_MIN = 800;
+const CPU_THINK_MS_MAX = 1400;
 
 // クライアントから受け取った値を安全に正規化（trim・長さ制限）
 function sanitize(payload) {
@@ -110,6 +113,39 @@ function registerHandlers(io, socket, roomManager) {
         startGameInRoom(io, room);
       }
 
+      if (typeof ack === 'function') ack({ ok: true });
+    } catch (err) {
+      socket.emit(S2C.LOBBY_ERROR, { message: err.message });
+      if (typeof ack === 'function') ack({ ok: false, error: err.message });
+    }
+  });
+
+  // -----------------------------------------------------------------
+  // ソロ練習: lobby:create-solo-room
+  // 人間 1 人＋CPU 2 体ですぐに対局を始める。テスト用。
+  // -----------------------------------------------------------------
+  socket.on(C2S.LOBBY_CREATE_SOLO_ROOM, (payload, ack) => {
+    try {
+      const name = String((payload && payload.name) || '').trim().slice(0, 20);
+      if (!name) throw new Error('名前を入力してください。');
+
+      const { room, token, playerId } = roomManager.createSoloRoom({
+        name,
+        socketId: socket.id,
+      });
+
+      socket.join(roomChannel(room.id));
+      socket.emit(S2C.LOBBY_ROOM_CREATED, {
+        roomId: room.id,
+        playerId,
+        token,
+        room: roomManager.publicView(room),
+        isSolo: true,
+      });
+      console.log(`[ソロ練習開始] roomId=${room.id} human=${name}`);
+
+      // 即対局開始
+      startGameInRoom(io, room);
       if (typeof ack === 'function') ack({ ok: true });
     } catch (err) {
       socket.emit(S2C.LOBBY_ERROR, { message: err.message });
@@ -558,9 +594,10 @@ function registerHandlers(io, socket, roomManager) {
 function startGameInRoom(io, room) {
   const engine = new GameEngine();
   const playerNames = room.players.map((p) => p.name);
+  const playerIsCpu = room.players.map((p) => !!p.isCpu);
   engine.init(null, {
     playerNames,
-    playerIsCpu: [false, false, false], // オンライン対戦は全員人間
+    playerIsCpu, // 通常対戦は全 false、ソロ練習は [false, true, true]
   });
 
   // 部屋に GameEngine を紐付け（フェーズ4b 以降の打牌処理で参照する）
@@ -623,6 +660,11 @@ function startTurnFor(io, room, playerId) {
     S2C.GAME_STATE_UPDATE,
     publicGameView(engine.state)
   );
+
+  // CPU プレイヤーなら自動行動をスケジュール（ソロ練習用）
+  if (playerNow.isCpu) {
+    scheduleCpuTurn(io, room, playerId);
+  }
 }
 
 // 自分のターンで使える選択肢をまとめたペイロードを作る
@@ -666,6 +708,118 @@ function progressToNextTurn(io, room) {
   const engine = room.gameEngine;
   engine.nextTurn();
   startTurnFor(io, room, engine.state.currentTurn);
+}
+
+// =====================================================================
+// CPU 自動行動（ソロ練習モード用）
+// =====================================================================
+
+// CPU のターンを思考時間後に実行
+function scheduleCpuTurn(io, room, playerId) {
+  const delay = CPU_THINK_MS_MIN + Math.random() * (CPU_THINK_MS_MAX - CPU_THINK_MS_MIN);
+  setTimeout(() => executeCpuAction(io, room, playerId), delay);
+}
+
+// CPU のターン中の意思決定（優先度: 北抜き → ツモ → リーチ → 打牌）
+function executeCpuAction(io, room, playerId) {
+  const engine = room && room.gameEngine;
+  if (!engine || room.state !== 'in-game') return;
+  if (room.pendingClaim) return;
+  if (engine.state.currentTurn !== playerId) return;
+
+  const player = engine.state.players.find((p) => p.id === playerId);
+  if (!player || !player.isCpu) return;
+
+  // (1) 北抜き：手牌に北があれば必ず（北は河に出せないので）
+  if (engine.hasKita(playerId)) {
+    doKitaInRoom(io, room, playerId, /*isAuto=*/false);
+    return;
+  }
+
+  // (2) ツモアガリ：成立すれば必ず
+  if (engine.canTsumo(playerId) && !engine.hasOtherFever(playerId)) {
+    const result = engine.checkAgariTsumo(playerId, engine.state.drawnTile);
+    if (result) {
+      finalizeAgari(io, room, {
+        agariResult: result,
+        winnerId: playerId,
+        isTsumo: true,
+        fromPlayer: null,
+      });
+      return;
+    }
+  }
+
+  // (3) リーチ：テンパイで条件満たすなら 70% で宣言
+  if (!player.isReached && !engine.hasOtherFever(playerId) && Math.random() < 0.7) {
+    const reachOpt = engine.cpuCheckReach(player);
+    if (reachOpt) {
+      const tile = reachOpt.discardTile;
+      const handIdx = reachOpt.discardIdx;
+      const reachType = reachOpt.isFuriten ? 'furiten' : 'normal';
+      engine.declareReach(playerId, reachType, tile);
+      const isTsumogiri = tile === engine.state.drawnTile;
+      engine.discardTile(playerId, tile, isTsumogiri, handIdx);
+
+      io.to(roomChannel(room.id)).emit(S2C.GAME_ACTION_RESULT, {
+        action: 'reach', playerId, tile, isTsumogiri,
+      });
+      io.to(roomChannel(room.id)).emit(S2C.GAME_STATE_UPDATE, publicGameView(engine.state));
+
+      const claimStarted = startClaimPhase(io, room);
+      if (!claimStarted) progressToNextTurn(io, room);
+      return;
+    }
+  }
+
+  // (4) 通常打牌
+  const tile = engine.cpuChooseDiscard(player);
+  const isTsumogiri = tile === engine.state.drawnTile;
+  engine.discardTile(playerId, tile, isTsumogiri);
+
+  io.to(roomChannel(room.id)).emit(S2C.GAME_ACTION_RESULT, {
+    action: 'discard', playerId, tile, isTsumogiri,
+  });
+  io.to(roomChannel(room.id)).emit(S2C.GAME_STATE_UPDATE, publicGameView(engine.state));
+
+  const claimStarted = startClaimPhase(io, room);
+  if (!claimStarted) progressToNextTurn(io, room);
+}
+
+// 鳴き応答中の CPU 判断（即時に decision を入れる）
+//   ロン: 100%、明カン: 40%、ポン: 25%、それ以外スキップ
+function decideCpuClaim(io, room, cpuPlayerId) {
+  const claim = room.pendingClaim;
+  if (!claim) return;
+  if (claim.responses.has(cpuPlayerId)) return;
+  const eligibility = claim.eligible.get(cpuPlayerId);
+  if (!eligibility) return;
+
+  let action = 'skip';
+  if (eligibility.canRon) action = 'ron';
+  else if (eligibility.canMinkan && Math.random() < 0.4) action = 'kan';
+  else if (eligibility.canPon && Math.random() < 0.25) action = 'pon';
+  // 北抜き応答（kita-claim）
+  else if (eligibility.canKan && Math.random() < 0.4) action = 'kan';
+  else if (eligibility.canPon && Math.random() < 0.25) action = 'pon';
+
+  claim.responses.set(cpuPlayerId, { action });
+  if (claim.type === 'kita') tryResolveKitaClaim(io, room);
+  else tryResolveClaim(io, room);
+}
+
+// CPU 全員に鳴き応答を予約（startClaimPhase / doKitaInRoom から呼ぶ）
+function scheduleCpuClaims(io, room) {
+  const claim = room.pendingClaim;
+  if (!claim) return;
+  const engine = room.gameEngine;
+  for (const pid of claim.eligible.keys()) {
+    const p = engine.state.players.find((pp) => pp.id === pid);
+    if (p && p.isCpu) {
+      const delay = CPU_THINK_MS_MIN + Math.random() * 400;
+      setTimeout(() => decideCpuClaim(io, room, pid), delay);
+    }
+  }
 }
 
 // -----------------------------------------------------------------
@@ -726,6 +880,9 @@ function startClaimPhase(io, room) {
   room.pendingClaim.timeoutId = setTimeout(() => {
     resolveClaim(io, room);
   }, CLAIM_TIMEOUT_MS);
+
+  // CPU 対象者には自動応答を予約（ソロ練習用）
+  scheduleCpuClaims(io, room);
 
   console.log(`[鳴き応答待ち] roomId=${room.id} 対象=${[...eligible.keys()].join(',')} 牌=${tile}`);
   return true;
@@ -823,7 +980,6 @@ function resolveClaim(io, room) {
       publicGameView(engine.state)
     );
     if (claimerRoomPlayer && claimerRoomPlayer.socketId) {
-      // ポン後の打牌では ankan/kakan/reach は基本的に使えないので discard と kakan のみ
       io.to(claimerRoomPlayer.socketId).emit(
         S2C.GAME_YOUR_TURN,
         buildYourTurnPayloadAfterCall(engine, winner.playerId)
@@ -846,6 +1002,12 @@ function resolveClaim(io, room) {
       S2C.GAME_STATE_UPDATE,
       publicGameView(engine.state)
     );
+  }
+
+  // 鳴いた本人が CPU なら自動的に打牌をスケジュール
+  const claimerEnginePlayer = engine.state.players.find((p) => p.id === winner.playerId);
+  if (claimerEnginePlayer && claimerEnginePlayer.isCpu) {
+    scheduleCpuTurn(io, room, winner.playerId);
   }
 
   console.log(`[鳴き成立] roomId=${room.id} ${winner.action}=${winner.playerId} 牌=${claim.tile}`);
@@ -1036,6 +1198,9 @@ function doKitaInRoom(io, room, playerId, isAuto) {
     resolveKitaClaim(io, room);
   }, CLAIM_TIMEOUT_MS);
 
+  // CPU 対象者の自動応答（ソロ練習用）
+  scheduleCpuClaims(io, room);
+
   console.log(`[北抜き応答待ち] roomId=${room.id} 抜いた人=${playerId} 対象=${[...kitaEligible.keys()].join(',')}`);
   return true;
 }
@@ -1117,6 +1282,11 @@ function resolveKitaClaim(io, room) {
     S2C.GAME_STATE_UPDATE,
     publicGameView(engine.state)
   );
+  // 北抜きを鳴いた本人が CPU なら自動行動
+  const winnerEnginePlayer = engine.state.players.find((p) => p.id === winner.playerId);
+  if (winnerEnginePlayer && winnerEnginePlayer.isCpu) {
+    scheduleCpuTurn(io, room, winner.playerId);
+  }
   console.log(`[北抜き応答成立] roomId=${room.id} ${winner.action}=${winner.playerId} from=${claim.fromPlayerId}`);
 }
 
@@ -1124,9 +1294,11 @@ function resolveKitaClaim(io, room) {
 function continueAfterKita(io, room, playerId, isAuto) {
   const engine = room.gameEngine;
   const player = engine.state.players.find((p) => p.id === playerId);
-  // FEVER 強制経由で、まだ手牌に北が残っていれば再度北抜き
-  if (isAuto && engine.hasOtherFever(playerId) && !player.isReached && engine.hasKita(playerId)) {
-    doKitaInRoom(io, room, playerId, /*isAuto=*/true);
+  // FEVER 強制経由 or CPU で、まだ手牌に北が残っていれば再度北抜き
+  const needsForcedKita = isAuto && engine.hasOtherFever(playerId) && !player.isReached && engine.hasKita(playerId);
+  const cpuStillHasKita = player.isCpu && !player.isReached && engine.hasKita(playerId);
+  if (needsForcedKita || cpuStillHasKita) {
+    doKitaInRoom(io, room, playerId, /*isAuto=*/needsForcedKita);
     return;
   }
   // 通常: 本人にツモ済の手牌+ターン通知
@@ -1145,6 +1317,10 @@ function continueAfterKita(io, room, playerId, isAuto) {
     S2C.GAME_STATE_UPDATE,
     publicGameView(engine.state)
   );
+  // CPU の場合は次の行動をスケジュール
+  if (player.isCpu) {
+    scheduleCpuTurn(io, room, playerId);
+  }
 }
 
 // -----------------------------------------------------------------

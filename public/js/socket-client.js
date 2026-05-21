@@ -130,6 +130,10 @@
     state.playerName = name;
     state.socket.emit('lobby:join-room', { name, password });
   }
+  function sendCreateSoloRoom({ name }) {
+    state.playerName = name;
+    state.socket.emit('lobby:create-solo-room', { name });
+  }
   function sendLeaveRoom() {
     if (state.socket) state.socket.emit('lobby:leave-room', {});
   }
@@ -187,6 +191,7 @@
     connect,
     sendCreateRoom,
     sendJoinRoom,
+    sendCreateSoloRoom,
     sendLeaveRoom,
     sendDiscard,
     sendPon,

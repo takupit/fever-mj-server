@@ -16,7 +16,7 @@
   const fm = window.feverMj;
 
   // ===== ビュー切替 =====
-  const VIEWS = ['view-menu', 'view-create', 'view-join', 'view-waiting', 'view-game'];
+  const VIEWS = ['view-menu', 'view-create', 'view-join', 'view-solo', 'view-waiting', 'view-game'];
   function showView(id) {
     for (const v of VIEWS) {
       const el = document.getElementById(v);
@@ -86,6 +86,17 @@
     // メニュー
     $('#btn-create').addEventListener('click', () => showView('view-create'));
     $('#btn-join').addEventListener('click', () => showView('view-join'));
+    $('#btn-solo').addEventListener('click', () => showView('view-solo'));
+
+    // ソロ練習
+    $('#solo-submit').addEventListener('click', () => {
+      const name = $('#solo-name').value.trim();
+      if (!name) { toast('名前を入力してください', 'error'); return; }
+      fm.sendCreateSoloRoom({ name });
+    });
+    $('#solo-name').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') $('#solo-submit').click();
+    });
 
     // 戻るボタン（全フォーム共通）
     document.querySelectorAll('.btn-back').forEach((btn) => {

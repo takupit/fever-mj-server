@@ -11,6 +11,7 @@ module.exports = {
     LOBBY_CREATE_ROOM: 'lobby:create-room',
     LOBBY_JOIN_ROOM: 'lobby:join-room',
     LOBBY_LEAVE_ROOM: 'lobby:leave-room',
+    LOBBY_CREATE_SOLO_ROOM: 'lobby:create-solo-room', // 1人＋CPU2 練習用
     GAME_DISCARD: 'game:discard',
     GAME_PON: 'game:pon',
     GAME_KAN: 'game:kan',
