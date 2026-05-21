@@ -226,6 +226,9 @@ function registerHandlers(io, socket, roomManager) {
         isReachDeclaration: player.discards[player.discards.length - 1].isReachDeclaration,
       });
 
+      // 打牌者本人に最新の手牌を再送（捨てた牌を表示から消すため）
+      socket.emit(S2C.GAME_YOUR_HAND, privateHandView(engine.state, myPlayerId));
+
       // 公開状態を更新（河に1枚追加）
       io.to(roomChannel(room.id)).emit(
         S2C.GAME_STATE_UPDATE,
@@ -385,12 +388,16 @@ function registerHandlers(io, socket, roomManager) {
         tile,
         isTsumogiri,
       });
+
+      // 打牌者本人に最新の手牌を再送（リーチ宣言で 1 枚減った状態を反映）
+      socket.emit(S2C.GAME_YOUR_HAND, privateHandView(engine.state, myPlayerId));
+
       io.to(roomChannel(room.id)).emit(
         S2C.GAME_STATE_UPDATE,
         publicGameView(engine.state)
       );
 
-      // リーチ宣言後の打牌でも鳴きはあり得る（ロンは step 3 で実装）
+      // リーチ宣言後の打牌でも鳴きはあり得る
       const claimStarted = startClaimPhase(io, room);
       if (!claimStarted) {
         progressToNextTurn(io, room);
