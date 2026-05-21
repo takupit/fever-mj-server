@@ -68,7 +68,34 @@ function publicGameView(state) {
     phase: state.phase,
     lastDiscard: state.lastDiscard ? { ...state.lastDiscard } : null,
     players: state.players.map(playerPublicView),
+    // FEVER 中の情報（仕様書 7. FEVER 視覚演出: 待ち牌・残り山牌数を全員に公開）
+    feverInfo: computeFeverInfo(state),
   };
+}
+
+// FEVER 中のプレイヤー情報を計算（複数人 FEVER がいる場合は配列で返す）
+//   各エントリ: { playerId, name, trigger, waits, waitsRemaining }
+//     trigger: 'p7' | 'm7' | 'double'
+//     waits: 待ち牌の基本牌コード配列
+//     waitsRemaining: 山に残っている待ち牌の枚数（公開情報）
+function computeFeverInfo(state) {
+  const { tileBase } = require('../game/tile-utils');
+  const feverPlayers = state.players.filter((p) => p.feverActive);
+  if (feverPlayers.length === 0) return null;
+  return feverPlayers.map((p) => {
+    const waits = p.reachWaits || [];
+    // 山牌の中に待ち牌が何枚残っているか
+    const waitsRemaining = waits.reduce((sum, w) => {
+      return sum + state.wall.filter((t) => tileBase(t) === w).length;
+    }, 0);
+    return {
+      playerId: p.id,
+      name: p.name,
+      trigger: p.feverTrigger || null,
+      waits: [...waits],
+      waitsRemaining,
+    };
+  });
 }
 
 // 指定プレイヤー本人に送る、自分専用の手牌情報

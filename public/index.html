@@ -856,6 +856,132 @@
     box-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
   }
 
+  /* FEVER 中の常時表示バナー（待ち牌・残り山残量つき） */
+  .fever-status-bar {
+    display: none;
+    margin-bottom: 8px;
+    padding: 8px 10px;
+    background: linear-gradient(90deg,
+      #ff2d55, #ff8c00, #ffd700, #00ff88, #00e5ff, #ff00aa, #ff2d55);
+    background-size: 250% 100%;
+    border: 2px solid #ffd700;
+    border-radius: 8px;
+    box-shadow: 0 0 16px rgba(255, 215, 0, 0.5);
+    animation: fever-bar-shift 3s linear infinite;
+    color: white;
+    text-shadow: 0 0 4px rgba(0,0,0,0.9), 1px 1px 0 rgba(0,0,0,0.8);
+  }
+  .fever-status-bar.show { display: block; }
+  .fsb-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 4px;
+  }
+  .fsb-row:last-child { margin-bottom: 0; }
+  .fsb-icon {
+    font-size: 16px;
+  }
+  .fsb-title {
+    font-weight: bold;
+    font-size: 13px;
+    letter-spacing: 1px;
+  }
+  .fsb-name { font-weight: bold; font-size: 13px; }
+  .fsb-trigger {
+    background: rgba(0,0,0,0.5);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+  }
+  .fsb-waits-row {
+    background: rgba(0,0,0,0.4);
+    padding: 4px 8px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .fsb-waits-label { font-size: 11px; }
+  .fsb-waits {
+    display: inline-flex;
+    gap: 2px;
+    align-items: center;
+  }
+  .fsb-waits .tile {
+    width: 18px; height: 24px;
+    font-size: 10px;
+  }
+  .fsb-remaining {
+    margin-left: auto;
+    background: #ffd700;
+    color: #1a1a1a;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: bold;
+    font-size: 12px;
+    text-shadow: none;
+  }
+  @keyframes fever-bar-shift {
+    from { background-position: 0% 0%; }
+    to   { background-position: 250% 0%; }
+  }
+
+  /* ===========================================================
+     カジノチップ視覚化
+     旧 play.html から移植: 黒チップ = 10枚分、色チップ = 1枚分
+     プレイヤー別の色: P0=青、P1=緑、P2=オレンジ
+     =========================================================== */
+  .chip-stack {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    margin-left: 4px;
+    vertical-align: middle;
+    height: 22px;
+  }
+  .chip-pile {
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 0;
+  }
+  .chip {
+    width: 14px;
+    height: 4px;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 0, 0, 0.5);
+    position: relative;
+    margin-top: -1px;
+    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.3);
+  }
+  .chip.black {
+    background: radial-gradient(ellipse at center, #4a4a4a 0%, #1a1a1a 70%, #000 100%);
+  }
+  .chip.blue {
+    background: radial-gradient(ellipse at center, #5599ff 0%, #1565c0 60%, #0d47a1 100%);
+  }
+  .chip.green {
+    background: radial-gradient(ellipse at center, #66bb6a 0%, #1a5d2c 60%, #0d3818 100%);
+  }
+  .chip.orange {
+    background: radial-gradient(ellipse at center, #ffa040 0%, #e67300 60%, #b35400 100%);
+  }
+  .chip-count {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.85);
+    margin-left: 4px;
+    font-family: monospace;
+    align-self: center;
+  }
+  .chip-more {
+    font-size: 9px;
+    color: #ffd700;
+    margin-left: 2px;
+    align-self: flex-end;
+  }
   /* 北抜きマーカー */
   .kita-mark {
     display: inline-flex;
@@ -1703,6 +1829,9 @@
         <div class="tile-row tile-row-small" id="game-dora"></div>
       </div>
     </div>
+
+    <!-- FEVER 中の常時表示バナー（仕様書 7. FEVER 視覚演出） -->
+    <div id="fever-status-bar" class="fever-status-bar"></div>
 
     <!-- 自分の卓 -->
     <div class="me-area panel">

@@ -289,6 +289,114 @@
   // ------------------------------------------------------------
   // 描画関数群（state を受けて DOM に反映）
   // ------------------------------------------------------------
+  // ------------------------------------------------------------
+  // カジノチップのスタック描画（旧 play.html から移植）
+  //   黒チップ = 10枚分（積み重ね・最大8枚表示）
+  //   色チップ = 1枚分（プレイヤー別: P0=青、P1=緑、P2=オレンジ）
+  //   末尾に数値も併記
+  // ------------------------------------------------------------
+  function makeChipStackEl(chips, playerIdx) {
+    const colorMap = ['blue', 'green', 'orange'];
+    const color = colorMap[playerIdx] || 'blue';
+    const stack = document.createElement('span');
+    stack.className = 'chip-stack';
+    chips = Math.max(0, Math.floor(chips || 0));
+
+    const blackCount = Math.floor(chips / 10);
+    const colorCount = chips % 10;
+
+    if (blackCount > 0) {
+      const pile = document.createElement('span');
+      pile.className = 'chip-pile';
+      const displayBlack = Math.min(blackCount, 8);
+      for (let i = 0; i < displayBlack; i++) {
+        const c = document.createElement('span');
+        c.className = 'chip black';
+        pile.appendChild(c);
+      }
+      stack.appendChild(pile);
+      if (blackCount > 8) {
+        const more = document.createElement('span');
+        more.className = 'chip-more';
+        more.textContent = `×${blackCount}`;
+        stack.appendChild(more);
+      }
+    }
+    if (colorCount > 0) {
+      const pile = document.createElement('span');
+      pile.className = 'chip-pile';
+      for (let i = 0; i < colorCount; i++) {
+        const c = document.createElement('span');
+        c.className = `chip ${color}`;
+        pile.appendChild(c);
+      }
+      stack.appendChild(pile);
+    }
+    const num = document.createElement('span');
+    num.className = 'chip-count';
+    num.textContent = `(${chips})`;
+    stack.appendChild(num);
+    return stack;
+  }
+
+  // playerId → 0/1/2 のインデックス
+  function playerIdx(playerId) {
+    return parseInt((playerId || 'P0').slice(1), 10);
+  }
+
+  // ------------------------------------------------------------
+  // FEVER 持続バナー描画（仕様書 7. 待ち牌・残り山残量を画面上部に常時表示）
+  // ------------------------------------------------------------
+  function renderFeverStatusBar(publicState) {
+    const el = document.getElementById('fever-status-bar');
+    if (!el) return;
+    const info = publicState && publicState.feverInfo;
+    if (!info || info.length === 0) {
+      el.classList.remove('show');
+      el.innerHTML = '';
+      return;
+    }
+    el.innerHTML = '';
+    for (const f of info) {
+      const triggerLabel = f.trigger === 'double' ? 'W-FEVER（七筒＆七萬）'
+                          : f.trigger === 'p7' ? '七筒の暗刻'
+                          : f.trigger === 'm7' ? '七萬の暗刻'
+                          : 'FEVER';
+      // 上段: 🎰 FEVER 🎰 + 名前 + 種別
+      const row1 = document.createElement('div');
+      row1.className = 'fsb-row';
+      row1.innerHTML = `
+        <span class="fsb-icon">🎰</span>
+        <span class="fsb-title">FEVER</span>
+        <span class="fsb-icon">🎰</span>
+        <span class="fsb-name">${escapeHtml(f.name)}</span>
+        <span class="fsb-trigger">${triggerLabel}</span>
+      `;
+      el.appendChild(row1);
+
+      // 下段: 待ち牌 + 山残量
+      const row2 = document.createElement('div');
+      row2.className = 'fsb-waits-row';
+      const label = document.createElement('span');
+      label.className = 'fsb-waits-label';
+      label.textContent = '待ち：';
+      row2.appendChild(label);
+
+      const waitsEl = document.createElement('span');
+      waitsEl.className = 'fsb-waits';
+      for (const w of f.waits) waitsEl.appendChild(makeTileEl(w));
+      row2.appendChild(waitsEl);
+
+      const remaining = document.createElement('span');
+      remaining.className = 'fsb-remaining';
+      remaining.textContent = `山に残り ${f.waitsRemaining} 枚`;
+      row2.appendChild(remaining);
+
+      el.appendChild(row2);
+    }
+    el.classList.add('show');
+  }
+
   function renderHeader(publicState) {
     const roundName = publicState.round.wind === 'E' ? '東' : '南';
     $('#game-round').textContent = `${roundName}${publicState.round.hand}局`;
@@ -334,7 +442,11 @@
     if (opponent.isReached) nameEl.innerHTML += ' <span class="reach-banner">立直</span>';
     if (opponent.feverActive) nameEl.innerHTML += ' <span class="fever-tag">🎰</span>';
     rootEl.querySelector('.opp-wind').textContent = WIND_NAMES[opponent.wind] || opponent.wind;
-    rootEl.querySelector('.opp-score').textContent = `${opponent.score}点 / ${opponent.chips || 0}💎`;
+    // 点数 + チップスタック視覚
+    const scoreEl = rootEl.querySelector('.opp-score');
+    scoreEl.innerHTML = '';
+    scoreEl.appendChild(document.createTextNode(`${opponent.score}点 `));
+    scoreEl.appendChild(makeChipStackEl(opponent.chips || 0, playerIdx(opponent.id)));
 
     // 副露ブロック（5c: 鳴き牌は横向き、各メルドを枠で分離）
     const meldsEl = rootEl.querySelector('[data-role="melds"]');
@@ -398,7 +510,11 @@
     if (me.feverActive) nameHtml += ' <span class="fever-tag">🎰FEVER</span>';
     $('#me-name').innerHTML = nameHtml;
     $('#me-wind').textContent = WIND_NAMES[me.wind] || me.wind;
-    $('#me-score').textContent = `${me.score}点 / ${me.chips || 0}💎`;
+    // 自分の点数 + チップスタック視覚
+    const meScoreEl = $('#me-score');
+    meScoreEl.innerHTML = '';
+    meScoreEl.appendChild(document.createTextNode(`${me.score}点 `));
+    meScoreEl.appendChild(makeChipStackEl(me.chips || 0, playerIdx(me.id)));
     $('.me-area').classList.toggle('current-turn', isCurrentTurn);
     $('.me-area').classList.toggle('reached', !!me.isReached);
     $('.me-area').classList.toggle('fever', !!me.feverActive);
@@ -548,7 +664,8 @@
 
     renderHeader(view.publicState);
     renderDora(view.publicState);
-    renderFeverBanner(view.publicState);
+    renderFeverStatusBar(view.publicState); // 待ち牌・山残量つきの新バナー
+    renderFeverBanner(view.publicState);    // 既存の上部固定バナー（互換維持）
     renderOpponent(
       $('#opp-left'),
       layout.leftOpp,
