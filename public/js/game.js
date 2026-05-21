@@ -331,30 +331,65 @@
     rootEl.classList.toggle('fever', !!opponent.feverActive);
     const nameEl = rootEl.querySelector('.opp-name');
     nameEl.textContent = opponent.name;
-    if (opponent.isReached) nameEl.innerHTML += ' <span class="reach-banner">リーチ</span>';
-    if (opponent.feverActive) nameEl.innerHTML += ' <span class="fever-tag">🎰FEVER</span>';
+    if (opponent.isReached) nameEl.innerHTML += ' <span class="reach-banner">立直</span>';
+    if (opponent.feverActive) nameEl.innerHTML += ' <span class="fever-tag">🎰</span>';
     rootEl.querySelector('.opp-wind').textContent = WIND_NAMES[opponent.wind] || opponent.wind;
     rootEl.querySelector('.opp-score').textContent = `${opponent.score}点 / ${opponent.chips || 0}💎`;
-    // 手牌は枚数だけ裏向きで（仕様書セキュリティ 1: 他家手牌の中身は公開しない）
+
+    // 副露ブロック（5c: 鳴き牌は横向き、各メルドを枠で分離）
+    const meldsEl = rootEl.querySelector('[data-role="melds"]');
+    if (meldsEl) {
+      renderMelds(meldsEl, opponent.melds, opponent.kitaPullsCount);
+    }
+
+    // 手牌（仕様書セキュリティ 1: 他家手牌の中身は公開しない・枚数のみ裏向き表示）
     fillTileBacks(rootEl.querySelector('[data-role="hand"]'), opponent.handCount);
-    // 副露
-    const handRow = rootEl.querySelector('[data-role="hand"]');
-    for (const m of opponent.melds) {
-      const sep = document.createElement('span');
-      sep.style.cssText = 'width:4px; display:inline-block;';
-      handRow.appendChild(sep);
-      for (const t of m.tiles) handRow.appendChild(makeTileEl(t));
-    }
-    // 北抜き数
-    if (opponent.kitaPullsCount > 0) {
-      const kita = document.createElement('span');
-      kita.className = 'kita-mark';
-      kita.textContent = `北×${opponent.kitaPullsCount}`;
-      handRow.appendChild(kita);
-    }
+
     // 河
     const discardEl = rootEl.querySelector('[data-role="discards"]');
     fillTileRow(discardEl, opponent.discards.map((d) => d.tile));
+  }
+
+  // 副露ブロック描画（5c で新規）
+  //   各メルドを meld-block で枠囲み、鳴き牌（fromPlayer が示す）は 90° 回転
+  //   ankan は2枚を裏向きで「これは暗カン」と分かるように
+  function renderMelds(containerEl, melds, kitaPullsCount) {
+    containerEl.innerHTML = '';
+    for (const meld of melds) {
+      const block = document.createElement('div');
+      block.className = 'meld-block ' + meld.type;
+
+      // 鳴き牌の位置は元コードでは tiles 配列の末尾（doPon/doMinkan で push される）
+      // ankan は全 4 枚同じ・fromPlayer=null。表示は2枚裏向き+2枚表向きの伝統的スタイル
+      if (meld.type === 'ankan') {
+        const tiles = meld.tiles;
+        // [裏, 表, 表, 裏] の伝統スタイル
+        for (let i = 0; i < tiles.length; i++) {
+          const tEl = makeTileEl(tiles[i]);
+          if (i === 0 || i === 3) {
+            tEl.classList.add('back', 'back-in-ankan');
+          }
+          block.appendChild(tEl);
+        }
+      } else {
+        // pon / minkan / kakan / chi: 末尾が鳴き牌
+        const tiles = meld.tiles;
+        const calledIdx = tiles.length - 1;
+        for (let i = 0; i < tiles.length; i++) {
+          const tEl = makeTileEl(tiles[i]);
+          if (i === calledIdx) tEl.classList.add('called');
+          block.appendChild(tEl);
+        }
+      }
+      containerEl.appendChild(block);
+    }
+    // 北抜き数（メルドの後ろに）
+    if (kitaPullsCount > 0) {
+      const kita = document.createElement('span');
+      kita.className = 'kita-mark';
+      kita.textContent = `北×${kitaPullsCount}`;
+      containerEl.appendChild(kita);
+    }
   }
 
   function renderMe(me, isCurrentTurn) {
@@ -367,15 +402,15 @@
     $('.me-area').classList.toggle('current-turn', isCurrentTurn);
     $('.me-area').classList.toggle('reached', !!me.isReached);
     $('.me-area').classList.toggle('fever', !!me.feverActive);
+
+    // 自分の副露ブロック（5c）
+    const myMeldsEl = document.getElementById('me-melds');
+    if (myMeldsEl) {
+      renderMelds(myMeldsEl, me.melds || [], me.kitaPullsCount || 0);
+    }
+
     // 自分の河
     fillTileRow($('#me-discards'), me.discards.map((d) => d.tile));
-    // 自分の北抜き数
-    if (me.kitaPullsCount > 0) {
-      const span = document.createElement('span');
-      span.className = 'kita-mark';
-      span.textContent = `北×${me.kitaPullsCount}`;
-      $('#me-discards').appendChild(span);
-    }
   }
 
   function renderMyHand(hand, drawnTile) {

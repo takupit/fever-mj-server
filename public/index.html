@@ -457,13 +457,16 @@
     to   { box-shadow: 0 0 12px rgba(0,229,255,1); }
   }
 
-  /* 対戦相手エリア */
-  .opponents-area {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-bottom: 8px;
+  /* 対戦相手エリア（5c で横並び・俯瞰レイアウトに） */
+  .opponents-area-top {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    margin-bottom: 6px;
   }
+  /* 旧 .opponents-area は使わなくなったが念のため残す */
+  .opponents-area { display: none; }
+
   .opponent {
     padding: 8px 10px;
   }
@@ -471,16 +474,36 @@
     border-color: #00e5ff;
     box-shadow: 0 0 8px rgba(0, 229, 255, 0.4);
   }
+  /* コンパクト対戦相手パネル */
+  .opponent.compact {
+    padding: 6px 8px;
+    font-size: 11px;
+    min-width: 0; /* グリッド内で縮小可能に */
+  }
   .opp-head {
     display: flex;
     justify-content: space-between;
     align-items: baseline;
-    margin-bottom: 6px;
+    margin-bottom: 3px;
     font-size: 12px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
-  .opp-name { font-weight: bold; color: #fff; }
-  .opp-wind { color: #ffd700; font-size: 11px; }
-  .opp-score { color: #00e5ff; font-family: monospace; }
+  .opp-name {
+    font-weight: bold;
+    color: #fff;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+    min-width: 0;
+  }
+  .opp-wind { color: #ffd700; font-size: 10px; margin-left: 4px; }
+  .opp-score-line {
+    text-align: right;
+    margin-bottom: 4px;
+  }
+  .opp-score { color: #00e5ff; font-family: monospace; font-size: 11px; }
   .opp-body {
     display: flex;
     flex-direction: column;
@@ -496,6 +519,117 @@
     color: rgba(255,255,255,0.5);
     min-width: 32px;
     padding-top: 4px;
+  }
+
+  /* 副露ブロック（5c で追加） */
+  .opp-melds, .me-melds {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 4px;
+    min-height: 0;
+  }
+  .opp-melds:empty, .me-melds:empty { display: none; }
+  .meld-block {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 1px;
+    padding: 2px 3px;
+    background: rgba(255, 215, 0, 0.08);
+    border: 1px solid rgba(255, 215, 0, 0.3);
+    border-radius: 3px;
+  }
+  .meld-block.ankan {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+  /* 鳴き牌の横向き回転（仕様書: 鳴いた牌は90度回転して表示） */
+  .tile.called {
+    transform: rotate(-90deg);
+    margin: 0 4px;
+  }
+  /* 暗カンの2枚は裏向き表示 */
+  .meld-block.ankan .tile.back-in-ankan {
+    background: linear-gradient(135deg, #4a3a1a, #2a1a08);
+    border-color: #1a0a00;
+    color: transparent;
+  }
+  .meld-block.ankan .tile.back-in-ankan > * { display: none; }
+
+  /* タイルサイズのバリエーション */
+  .tile-row-mini { gap: 1px; min-height: 18px; }
+  .tile-row-mini .tile {
+    width: 13px;
+    height: 18px;
+    font-size: 8px;
+    border-width: 1px;
+    padding: 0;
+  }
+  .tile-row-river { gap: 1px; min-height: 16px; flex-wrap: wrap; max-height: 60px; overflow: hidden; }
+  .tile-row-river .tile {
+    width: 14px;
+    height: 19px;
+    font-size: 8px;
+    border-width: 1px;
+    padding: 0;
+  }
+  /* 副露内の牌（mini サイズ） */
+  .meld-block .tile {
+    width: 14px;
+    height: 19px;
+    font-size: 9px;
+    border-width: 1px;
+    padding: 0;
+  }
+  .meld-block .tile.called {
+    width: 19px; /* 回転後の見かけ幅 */
+    height: 14px;
+  }
+
+  /* 中央情報パネル（局・残山・ドラを1ヶ所に） */
+  .center-info {
+    padding: 6px 10px;
+    margin-bottom: 8px;
+  }
+  .center-info-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+  .center-info-row:last-child { margin-bottom: 0; }
+  .center-info-row .round-label {
+    font-size: 16px; color: #ffd700; font-weight: bold;
+  }
+  .center-info-row .honba-label {
+    color: rgba(255,255,255,0.6); font-size: 11px;
+  }
+  .center-info-row .wall-label {
+    color: rgba(255,255,255,0.7); font-size: 11px;
+  }
+  .center-info-row .wall-label strong { color: #ffd700; font-size: 13px; }
+  .center-dora-row .dora-title {
+    font-size: 10px; color: #ffd700; margin-right: 4px;
+  }
+  /* 中央パネル内のドラは小さく */
+  .center-dora-row .tile-row .tile {
+    width: 16px; height: 22px; font-size: 9px;
+  }
+
+  /* 自分の副露 */
+  .me-melds {
+    padding: 4px 0;
+  }
+  .me-melds .meld-block .tile {
+    width: 20px;
+    height: 27px;
+    font-size: 11px;
+    border-width: 1px;
+  }
+  .me-melds .meld-block .tile.called {
+    width: 27px;
+    height: 20px;
   }
 
   /* 自分の卓 */
@@ -1501,62 +1635,51 @@
     </div>
   </section>
 
-  <!-- ビュー5: 対局画面（フェーズ4a: 配牌＋自分の手牌表示まで） -->
+  <!-- ビュー5: 対局画面（フェーズ5c で俯瞰レイアウトに） -->
   <section id="view-game" class="view">
 
-    <!-- 卓ヘッダ: 局・本場・残り山 -->
-    <div class="game-header panel">
-      <div class="game-header-left">
+    <!-- 上段: 対戦相手2人を横並びで表示（コンパクト） -->
+    <div class="opponents-area-top">
+      <div class="opponent compact panel" data-seat="left" id="opp-left">
+        <div class="opp-head">
+          <span class="opp-name">--</span>
+          <span class="opp-wind">--</span>
+        </div>
+        <div class="opp-score-line">
+          <span class="opp-score">--</span>
+        </div>
+        <!-- 副露ブロック -->
+        <div class="opp-melds" data-role="melds"></div>
+        <!-- 手牌（裏向き） -->
+        <div class="tile-row tile-row-mini" data-role="hand"></div>
+        <!-- 河 -->
+        <div class="tile-row tile-row-river" data-role="discards"></div>
+      </div>
+
+      <div class="opponent compact panel" data-seat="right" id="opp-right">
+        <div class="opp-head">
+          <span class="opp-name">--</span>
+          <span class="opp-wind">--</span>
+        </div>
+        <div class="opp-score-line">
+          <span class="opp-score">--</span>
+        </div>
+        <div class="opp-melds" data-role="melds"></div>
+        <div class="tile-row tile-row-mini" data-role="hand"></div>
+        <div class="tile-row tile-row-river" data-role="discards"></div>
+      </div>
+    </div>
+
+    <!-- 中央パネル: 局・本場・残り山・ドラ -->
+    <div class="center-info panel">
+      <div class="center-info-row">
         <span class="round-label" id="game-round">--</span>
         <span class="honba-label" id="game-honba">0本場</span>
-      </div>
-      <div class="game-header-right">
         <span class="wall-label">残り <strong id="game-wall">--</strong> 枚</span>
       </div>
-    </div>
-
-    <!-- ドラ表示牌 -->
-    <div class="dora-area panel">
-      <span class="dora-title">ドラ表示</span>
-      <div class="tile-row" id="game-dora"></div>
-    </div>
-
-    <!-- 対戦相手2人（縦に並べる） -->
-    <div class="opponents-area">
-      <div class="opponent panel" data-seat="left" id="opp-left">
-        <div class="opp-head">
-          <span class="opp-name">--</span>
-          <span class="opp-wind">--</span>
-          <span class="opp-score">--</span>
-        </div>
-        <div class="opp-body">
-          <div class="opp-section">
-            <span class="opp-section-label">手牌</span>
-            <div class="tile-row" data-role="hand"></div>
-          </div>
-          <div class="opp-section">
-            <span class="opp-section-label">河</span>
-            <div class="tile-row tile-row-small" data-role="discards"></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="opponent panel" data-seat="right" id="opp-right">
-        <div class="opp-head">
-          <span class="opp-name">--</span>
-          <span class="opp-wind">--</span>
-          <span class="opp-score">--</span>
-        </div>
-        <div class="opp-body">
-          <div class="opp-section">
-            <span class="opp-section-label">手牌</span>
-            <div class="tile-row" data-role="hand"></div>
-          </div>
-          <div class="opp-section">
-            <span class="opp-section-label">河</span>
-            <div class="tile-row tile-row-small" data-role="discards"></div>
-          </div>
-        </div>
+      <div class="center-info-row center-dora-row">
+        <span class="dora-title">ドラ</span>
+        <div class="tile-row tile-row-small" id="game-dora"></div>
       </div>
     </div>
 
@@ -1567,6 +1690,8 @@
         <span class="me-wind" id="me-wind">--</span>
         <span class="me-score" id="me-score">--</span>
       </div>
+      <!-- 自分の副露 -->
+      <div class="me-melds" id="me-melds"></div>
       <div class="me-section">
         <span class="me-section-label">河</span>
         <div class="tile-row tile-row-small" id="me-discards"></div>
