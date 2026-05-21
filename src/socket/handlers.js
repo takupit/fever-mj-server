@@ -196,7 +196,11 @@ function registerHandlers(io, socket, roomManager) {
       if (!player || !player.hand.includes(tile)) {
         throw new Error('その牌は手牌にありません。');
       }
-      // 検証4: リーチ後はツモ切りのみ
+      // 検証4: 北は河に捨てられない（必ず北抜きするべき・仕様書 5）
+      if (tile === 'z4') {
+        throw new Error('北は河に捨てられません。「🟢 北抜き」ボタンで抜いてください。');
+      }
+      // 検証5: リーチ後はツモ切りのみ
       if (player.isReached && tile !== engine.state.drawnTile) {
         throw new Error('リーチ後はツモ切りしかできません。');
       }

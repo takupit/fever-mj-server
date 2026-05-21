@@ -471,8 +471,22 @@
   }
 
   // 牌クリック（通常モード） → 打牌送信
+  //   北（z4）の場合は河に捨てられないので、自動で「北抜き」に変換して送信。
   function onTileClick(tile, handIdx) {
     if (!view.canDiscard || view.discarding) return;
+    // 北は打牌不可 → 北抜きに変換
+    if (tile === 'z4') {
+      const opts = view.myTurnOptions && view.myTurnOptions.options;
+      if (opts && opts.includes('kita')) {
+        view.discarding = true;
+        view.canDiscard = false;
+        rerender();
+        fm.sendKita();
+      } else {
+        showToast('現在は北抜きできません（リーチ後の制約等）', 'error');
+      }
+      return;
+    }
     view.discarding = true;
     view.canDiscard = false;
     rerender();
