@@ -44,6 +44,8 @@ test('publicGameView: 各プレイヤーに公開してよい情報だけが出�
       'id', 'name', 'wind', 'score', 'chips', 'handCount',
       'discards', 'melds', 'kitaPullsCount',
       'isReached', 'reachType', 'feverActive', 'feverTrigger', 'connected',
+      // フェーズ6 で追加: CPU 代打バッジ表示用フラグ
+      'isCpu', 'cpuTakeover',
     ].sort();
     const actualKeys = Object.keys(p).sort();
     assert.deepStrictEqual(actualKeys, expectedKeys);

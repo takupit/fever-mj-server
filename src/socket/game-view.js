@@ -31,7 +31,9 @@ function discardView(d) {
 }
 
 // 1プレイヤーの「公開してよい情報」を返す（手牌の中身は含まない）
-function playerPublicView(p) {
+// roomPlayer (オプション) が渡されたら、ネットワーク状態を反映。なければデフォルト値。
+// フィールド一覧は常に同じ（テストで明示的に検証されている）。
+function playerPublicView(p, roomPlayer = null) {
   return {
     id: p.id,
     name: p.name,
@@ -46,12 +48,17 @@ function playerPublicView(p) {
     reachType: p.reachType || null,
     feverActive: !!p.feverActive,
     feverTrigger: p.feverTrigger || null,
-    connected: p.connected !== false,    // RoomManager 側で false にされる場合あり
+    // engine.state.players[i].isCpu。ソロ練習の元 CPU と代打開始後の両方で true
+    isCpu: !!p.isCpu,
+    // フェーズ6: ネットワーク状態
+    connected: roomPlayer ? roomPlayer.connected !== false : true,
+    cpuTakeover: roomPlayer ? !!roomPlayer.cpuTakeover : false, // 切断由来の代打のみ true
   };
 }
 
 // 全員に送ってよい公開状態（公開ビュー）
-function publicGameView(state) {
+// room (オプション) が渡されたら、各プレイヤーの connected/cpuTakeover も含める
+function publicGameView(state, room = null) {
   return {
     round: {
       wind: state.roundWind,   // 'E' | 'S'
@@ -67,7 +74,10 @@ function publicGameView(state) {
     reachSticks: state.reachSticks,
     phase: state.phase,
     lastDiscard: state.lastDiscard ? { ...state.lastDiscard } : null,
-    players: state.players.map(playerPublicView),
+    players: state.players.map((p, i) => {
+      const rp = room && room.players ? room.players[i] : null;
+      return playerPublicView(p, rp);
+    }),
     // FEVER 中の情報（仕様書 7. FEVER 視覚演出: 待ち牌・残り山牌数を全員に公開）
     feverInfo: computeFeverInfo(state),
   };

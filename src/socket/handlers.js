@@ -24,6 +24,7 @@ const {
   calculateChipMoves,
   calculateChunHatsuBonus,
 } = require('../game/chip');
+const cpuAi = require('../cpu/ai');
 
 // 鳴き応答の制限時間（仕様書「13. ポン・ロン応答」より 8 秒）
 const CLAIM_TIMEOUT_MS = 8000;
@@ -234,7 +235,7 @@ function registerHandlers(io, socket, roomManager) {
       // 公開状態を更新（河に1枚追加）
       io.to(roomChannel(room.id)).emit(
         S2C.GAME_STATE_UPDATE,
-        publicGameView(engine.state)
+        publicGameView(engine.state, room)
       );
 
       // 鳴き応答チェック: 誰かポン/明カンできるなら 8 秒応答待ち、
@@ -334,7 +335,7 @@ function registerHandlers(io, socket, roomManager) {
         }
         io.to(roomChannel(room.id)).emit(
           S2C.GAME_STATE_UPDATE,
-          publicGameView(engine.state)
+          publicGameView(engine.state, room)
         );
       } else {
         throw new Error(`不明なカン種別: ${type}`);
@@ -396,7 +397,7 @@ function registerHandlers(io, socket, roomManager) {
 
       io.to(roomChannel(room.id)).emit(
         S2C.GAME_STATE_UPDATE,
-        publicGameView(engine.state)
+        publicGameView(engine.state, room)
       );
 
       // リーチ宣言後の打牌でも鳴きはあり得る
@@ -738,7 +739,7 @@ function startTurnFor(io, room, playerId) {
     // 公開状態を一度更新してから自動北抜き
     io.to(roomChannel(room.id)).emit(
       S2C.GAME_STATE_UPDATE,
-      publicGameView(engine.state)
+      publicGameView(engine.state, room)
     );
     doKitaInRoom(io, room, playerId, /*isAuto=*/true);
     return;
@@ -760,7 +761,7 @@ function startTurnFor(io, room, playerId) {
   // 山が1枚減ったので公開状態を再ブロードキャスト
   io.to(roomChannel(room.id)).emit(
     S2C.GAME_STATE_UPDATE,
-    publicGameView(engine.state)
+    publicGameView(engine.state, room)
   );
 
   // CPU プレイヤーなら自動行動をスケジュール（ソロ練習用）
@@ -852,8 +853,8 @@ function executeCpuAction(io, room, playerId) {
     }
   }
 
-  // (3) リーチ：テンパイで条件満たすなら 70% で宣言
-  if (!player.isReached && !engine.hasOtherFever(playerId) && Math.random() < 0.7) {
+  // (3) リーチ：テンパイで条件満たすなら 70% で宣言（cpuAi.shouldDeclareReach 経由）
+  if (!player.isReached && !engine.hasOtherFever(playerId) && cpuAi.shouldDeclareReach()) {
     const reachOpt = engine.cpuCheckReach(player);
     if (reachOpt) {
       const tile = reachOpt.discardTile;
@@ -866,7 +867,7 @@ function executeCpuAction(io, room, playerId) {
       io.to(roomChannel(room.id)).emit(S2C.GAME_ACTION_RESULT, {
         action: 'reach', playerId, tile, isTsumogiri,
       });
-      io.to(roomChannel(room.id)).emit(S2C.GAME_STATE_UPDATE, publicGameView(engine.state));
+      io.to(roomChannel(room.id)).emit(S2C.GAME_STATE_UPDATE, publicGameView(engine.state, room));
 
       const claimStarted = startClaimPhase(io, room);
       if (!claimStarted) progressToNextTurn(io, room);
@@ -882,14 +883,14 @@ function executeCpuAction(io, room, playerId) {
   io.to(roomChannel(room.id)).emit(S2C.GAME_ACTION_RESULT, {
     action: 'discard', playerId, tile, isTsumogiri,
   });
-  io.to(roomChannel(room.id)).emit(S2C.GAME_STATE_UPDATE, publicGameView(engine.state));
+  io.to(roomChannel(room.id)).emit(S2C.GAME_STATE_UPDATE, publicGameView(engine.state, room));
 
   const claimStarted = startClaimPhase(io, room);
   if (!claimStarted) progressToNextTurn(io, room);
 }
 
 // 鳴き応答中の CPU 判断（即時に decision を入れる）
-//   ロン: 100%、明カン: 40%、ポン: 25%、それ以外スキップ
+// 判断ロジック本体は src/cpu/ai.js の decideClaim に分離。
 function decideCpuClaim(io, room, cpuPlayerId) {
   const claim = room.pendingClaim;
   if (!claim) return;
@@ -897,14 +898,7 @@ function decideCpuClaim(io, room, cpuPlayerId) {
   const eligibility = claim.eligible.get(cpuPlayerId);
   if (!eligibility) return;
 
-  let action = 'skip';
-  if (eligibility.canRon) action = 'ron';
-  else if (eligibility.canMinkan && Math.random() < 0.4) action = 'kan';
-  else if (eligibility.canPon && Math.random() < 0.25) action = 'pon';
-  // 北抜き応答（kita-claim）
-  else if (eligibility.canKan && Math.random() < 0.4) action = 'kan';
-  else if (eligibility.canPon && Math.random() < 0.25) action = 'pon';
-
+  const action = cpuAi.decideClaim(eligibility);
   claim.responses.set(cpuPlayerId, { action });
   if (claim.type === 'kita') tryResolveKitaClaim(io, room);
   else tryResolveClaim(io, room);
@@ -1079,7 +1073,7 @@ function resolveClaim(io, room) {
     // ポンは嶺上ツモなし → そのまま打牌へ
     io.to(roomChannel(room.id)).emit(
       S2C.GAME_STATE_UPDATE,
-      publicGameView(engine.state)
+      publicGameView(engine.state, room)
     );
     if (claimerRoomPlayer && claimerRoomPlayer.socketId) {
       io.to(claimerRoomPlayer.socketId).emit(
@@ -1102,7 +1096,7 @@ function resolveClaim(io, room) {
     }
     io.to(roomChannel(room.id)).emit(
       S2C.GAME_STATE_UPDATE,
-      publicGameView(engine.state)
+      publicGameView(engine.state, room)
     );
   }
 
@@ -1208,7 +1202,7 @@ function finalizeAgari(io, room, { agariResult, winnerId, isTsumo, fromPlayer })
   // 公開状態も最終的に更新
   io.to(roomChannel(room.id)).emit(
     S2C.GAME_STATE_UPDATE,
-    publicGameView(engine.state)
+    publicGameView(engine.state, room)
   );
 
   // 状態を hand-end にしてアクション受付を停止
@@ -1252,7 +1246,7 @@ function doKitaInRoom(io, room, playerId, isAuto) {
   });
   io.to(roomChannel(room.id)).emit(
     S2C.GAME_STATE_UPDATE,
-    publicGameView(engine.state)
+    publicGameView(engine.state, room)
   );
 
   // 他家の北抜き応答チェック
@@ -1382,7 +1376,7 @@ function resolveKitaClaim(io, room) {
   }
   io.to(roomChannel(room.id)).emit(
     S2C.GAME_STATE_UPDATE,
-    publicGameView(engine.state)
+    publicGameView(engine.state, room)
   );
   // 北抜きを鳴いた本人が CPU なら自動行動
   const winnerEnginePlayer = engine.state.players.find((p) => p.id === winner.playerId);
@@ -1417,7 +1411,7 @@ function continueAfterKita(io, room, playerId, isAuto) {
   }
   io.to(roomChannel(room.id)).emit(
     S2C.GAME_STATE_UPDATE,
-    publicGameView(engine.state)
+    publicGameView(engine.state, room)
   );
   // CPU の場合は次の行動をスケジュール
   if (player.isCpu) {
@@ -1452,7 +1446,7 @@ function finalizeRyukyoku(io, room) {
   // 公開状態も最終的に更新
   io.to(roomChannel(room.id)).emit(
     S2C.GAME_STATE_UPDATE,
-    publicGameView(engine.state)
+    publicGameView(engine.state, room)
   );
 
   engine.state.phase = 'hand-end';
@@ -1597,7 +1591,7 @@ function broadcastHandStart(io, room) {
   }
   io.to(roomChannel(room.id)).emit(
     S2C.GAME_STATE_UPDATE,
-    publicGameView(engine.state)
+    publicGameView(engine.state, room)
   );
 }
 

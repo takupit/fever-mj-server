@@ -437,10 +437,19 @@
     rootEl.classList.toggle('current-turn', isCurrentTurn);
     rootEl.classList.toggle('reached', !!opponent.isReached);
     rootEl.classList.toggle('fever', !!opponent.feverActive);
+    // フェーズ6: 切断中 / CPU 代打中の状態クラス
+    rootEl.classList.toggle('disconnected', opponent.connected === false && !opponent.cpuTakeover);
+    rootEl.classList.toggle('cpu-takeover', !!opponent.cpuTakeover);
     const nameEl = rootEl.querySelector('.opp-name');
     nameEl.textContent = opponent.name;
     if (opponent.isReached) nameEl.innerHTML += ' <span class="reach-banner">立直</span>';
     if (opponent.feverActive) nameEl.innerHTML += ' <span class="fever-tag">🎰</span>';
+    // フェーズ6: 切断・CPU 代打バッジ（仕様書「8. CPU代打AI」プレイヤー名の横にバッジ）
+    if (opponent.cpuTakeover) {
+      nameEl.innerHTML += ' <span class="cpu-takeover-badge">🤖 CPU代打中</span>';
+    } else if (opponent.connected === false) {
+      nameEl.innerHTML += ' <span class="disconnected-badge">🔌 切断中</span>';
+    }
     rootEl.querySelector('.opp-wind').textContent = WIND_NAMES[opponent.wind] || opponent.wind;
     // 点数 + チップスタック視覚
     const scoreEl = rootEl.querySelector('.opp-score');

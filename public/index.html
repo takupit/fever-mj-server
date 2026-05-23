@@ -982,6 +982,46 @@
     margin-left: 2px;
     align-self: flex-end;
   }
+  /* フェーズ6: 切断・CPU 代打バッジ（プレイヤー名の横に常時表示） */
+  .opp-name .cpu-takeover-badge,
+  #me-name .cpu-takeover-badge {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 1px 6px;
+    background: linear-gradient(135deg, #66bb6a, #1a5d2c);
+    color: #fff;
+    font-size: 9px;
+    border-radius: 6px;
+    font-weight: bold;
+    vertical-align: middle;
+    animation: cpu-badge-pulse 1.5s ease-in-out infinite;
+  }
+  .opp-name .disconnected-badge,
+  #me-name .disconnected-badge {
+    display: inline-block;
+    margin-left: 4px;
+    padding: 1px 6px;
+    background: rgba(255, 45, 85, 0.3);
+    color: #ff8a9b;
+    border: 1px solid rgba(255, 45, 85, 0.5);
+    font-size: 9px;
+    border-radius: 6px;
+    font-weight: bold;
+    vertical-align: middle;
+  }
+  @keyframes cpu-badge-pulse {
+    0%, 100% { box-shadow: 0 0 4px rgba(102, 187, 106, 0.4); }
+    50%      { box-shadow: 0 0 12px rgba(102, 187, 106, 0.9); }
+  }
+  /* 対戦相手パネルが切断 / CPU 代打中なら全体の枠も変える */
+  .opponent.disconnected {
+    border-color: rgba(255, 45, 85, 0.4);
+    opacity: 0.85;
+  }
+  .opponent.cpu-takeover {
+    border-color: rgba(102, 187, 106, 0.6);
+  }
+
   /* 北抜きマーカー */
   .kita-mark {
     display: inline-flex;

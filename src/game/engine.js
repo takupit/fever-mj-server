@@ -38,6 +38,7 @@ const {
   INITIAL_SCORE,
   INITIAL_CHIPS,
 } = require('./constants');
+const cpuAi = require('../cpu/ai'); // フェーズ6: CPU AI を専用モジュールに分離
 
 class GameEngine {
   constructor() {
@@ -715,50 +716,10 @@ class GameEngine {
     return true;
   }
 
-  // CPU 打牌 AI（フェーズ6 で src/cpu/ai.js の代打 AI から呼び出す予定）
+  // CPU 打牌 AI（フェーズ6 で src/cpu/ai.js に分離・ここはラッパー）
+  // 既存テストや handlers.js が engine.cpuChooseDiscard を呼ぶ前提なので残置。
   cpuChooseDiscard(player) {
-    const hand = player.hand;
-    if (player.isReached) {
-      // リーチ中はツモ切り
-      const lastTile = hand[hand.length - 1];
-      if (lastTile === 'z4') {
-        // 北は河に出せないので、北以外を選ぶ
-        for (const t of hand) {
-          if (t !== 'z4') return t;
-        }
-      }
-      return lastTile;
-    }
-
-    // 北は河に捨てない（北抜きが優先されるが念のため除外）
-    const candidates = hand
-      .filter((t) => t !== 'z4')
-      .map((t) => {
-        const base = tileBase(t);
-        const counts = countTiles(hand);
-        let score = 0;
-
-        if (isJihai(base) && counts[base] === 1) score += 100;
-        if (isShuupai(base)) {
-          const n = tileNumber(base);
-          if ((n === 1 || n === 9) && counts[base] === 1) score += 80;
-          const suit = tileSuit(base);
-          const adj = [`${suit}${n - 1}`, `${suit}${n + 1}`, `${suit}${n - 2}`, `${suit}${n + 2}`];
-          const adjCount = adj.filter((x) => counts[x]).length;
-          score -= adjCount * 10;
-        }
-        if (counts[base] >= 2) score -= 50;
-        if (base === 'p7' || base === 'm7') score -= 30;
-
-        return { tile: t, score };
-      });
-
-    if (candidates.length === 0) {
-      return hand[0];
-    }
-
-    candidates.sort((a, b) => b.score - a.score);
-    return candidates[0].tile;
+    return cpuAi.chooseDiscard(player);
   }
 
   // 他のプレイヤーが FEVER 中か（boolean）
@@ -827,39 +788,11 @@ class GameEngine {
     return options;
   }
 
-  // リーチ判定（14枚状態で）- フリテンも検出
+  // リーチ判定（14 枚状態で）- フリテンも検出
+  // フェーズ6 で実装本体は src/cpu/ai.js に分離・ここはラッパー
   // 戻り値: false | { discardIdx, discardTile, isFuriten }
   cpuCheckReach(player) {
-    if (player.isReached) return false;
-    if (player.score < 1000) return false;
-    if (this.state.wall.length < 4) return false;
-    if (player.melds.some((m) => m.type !== 'ankan')) return false;
-
-    let bestNonFuriten = null;
-    let bestFuriten = null;
-
-    for (let i = 0; i < player.hand.length; i++) {
-      // 北は河に捨てられないので、北を切るリーチも除外
-      if (player.hand[i] === 'z4') continue;
-
-      const test = [...player.hand];
-      test.splice(i, 1);
-      if (isTenpai(test, player.melds)) {
-        const waits = getWaitingTiles(test, player.melds);
-        const ownDiscards = player.discards.map((d) => tileBase(d.tile));
-        const isFuriten = waits.some((w) => ownDiscards.includes(tileBase(w)));
-
-        if (!isFuriten && !bestNonFuriten) {
-          bestNonFuriten = { discardIdx: i, discardTile: player.hand[i], isFuriten: false };
-        }
-        if (isFuriten && !bestFuriten) {
-          bestFuriten = { discardIdx: i, discardTile: player.hand[i], isFuriten: true };
-        }
-      }
-    }
-
-    // 通常リーチ可能ならそれを優先、ダメならフリテンリーチも返す
-    return bestNonFuriten || bestFuriten || false;
+    return cpuAi.checkReach(player, this.state.wall.length);
   }
 
   // FEVER 可能判定（リーチ可能でかつ七筒 or 七萬の暗刻あり）
