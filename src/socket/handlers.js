@@ -44,22 +44,33 @@ function sanitize(payload) {
   return { name, password };
 }
 
+// 永続プレイヤーID（クライアントが localStorage から送ってくる UUID）の正規化
+// 不正な値が来ても落ちないように、文字列以外や長さ外れは null にする。
+function sanitizePlayerId(id) {
+  if (typeof id !== 'string') return null;
+  const trimmed = id.trim();
+  if (trimmed.length < 8 || trimmed.length > 64) return null;
+  return trimmed;
+}
+
 // 部屋ID から Socket.IO のルーム名（チャネル名）を作る
 function roomChannel(roomId) {
   return `room:${roomId}`;
 }
 
-function registerHandlers(io, socket, roomManager) {
+function registerHandlers(io, socket, roomManager, statsStore = null) {
   // -----------------------------------------------------------------
   // 部屋作成: lobby:create-room
   // -----------------------------------------------------------------
   socket.on(C2S.LOBBY_CREATE_ROOM, (payload, ack) => {
     try {
       const { name, password } = sanitize(payload);
+      const persistentPlayerId = sanitizePlayerId(payload && payload.persistentPlayerId);
       const { room, token, playerId } = roomManager.createRoom({
         password,
         name,
         socketId: socket.id,
+        persistentPlayerId,
       });
 
       // この socket を「部屋専用チャネル」に参加させる
@@ -87,10 +98,12 @@ function registerHandlers(io, socket, roomManager) {
   socket.on(C2S.LOBBY_JOIN_ROOM, (payload, ack) => {
     try {
       const { name, password } = sanitize(payload);
+      const persistentPlayerId = sanitizePlayerId(payload && payload.persistentPlayerId);
       const { room, player, token, playerId, isFull } = roomManager.joinRoom({
         password,
         name,
         socketId: socket.id,
+        persistentPlayerId,
       });
 
       socket.join(roomChannel(room.id));
@@ -131,10 +144,12 @@ function registerHandlers(io, socket, roomManager) {
     try {
       const name = String((payload && payload.name) || '').trim().slice(0, 20);
       if (!name) throw new Error('名前を入力してください。');
+      const persistentPlayerId = sanitizePlayerId(payload && payload.persistentPlayerId);
 
       const { room, token, playerId } = roomManager.createSoloRoom({
         name,
         socketId: socket.id,
+        persistentPlayerId,
       });
 
       socket.join(roomChannel(room.id));
@@ -379,7 +394,11 @@ function registerHandlers(io, socket, roomManager) {
       }
 
       // リーチ宣言 + 打牌
-      engine.declareReach(myPlayerId, 'normal', tile);
+      const reachResult = engine.declareReach(myPlayerId, 'normal', tile);
+      // フェーズ7: FEVER 発動なら戦績集計用にカウント
+      if (reachResult && reachResult.trigger && room.gameStats && room.gameStats[myPlayerId]) {
+        room.gameStats[myPlayerId].feverCount += 1;
+      }
       const isTsumogiri = tile === engine.state.drawnTile;
       const handIdx = typeof payload.handIdx === 'number' ? payload.handIdx : null;
       const ok = engine.discardTile(myPlayerId, tile, isTsumogiri, handIdx);
@@ -708,6 +727,13 @@ function startGameInRoom(io, room) {
   room.state = 'in-game';
   room.lastResult = null;
 
+  // フェーズ7: 対局単位の役満・FEVER カウントを初期化（戦績記録用）
+  // 各プレイヤーごとに対局中の累積を持つ。finalizeGameEnd で DB に書く
+  room.gameStats = {};
+  for (const p of room.players) {
+    room.gameStats[p.id] = { yakumanCount: 0, feverCount: 0 };
+  }
+
   // 開始ブロードキャスト（次局以降と共通）
   broadcastHandStart(io, room);
   console.log(`[対局開始] roomId=${room.id} dealer=${engine.state.dealerId} ware=${engine.state.warePlayer}`);
@@ -860,7 +886,11 @@ function executeCpuAction(io, room, playerId) {
       const tile = reachOpt.discardTile;
       const handIdx = reachOpt.discardIdx;
       const reachType = reachOpt.isFuriten ? 'furiten' : 'normal';
-      engine.declareReach(playerId, reachType, tile);
+      const reachResult = engine.declareReach(playerId, reachType, tile);
+      // フェーズ7: CPU でも FEVER 発動を戦績にカウント
+      if (reachResult && reachResult.trigger && room.gameStats && room.gameStats[playerId]) {
+        room.gameStats[playerId].feverCount += 1;
+      }
       const isTsumogiri = tile === engine.state.drawnTile;
       engine.discardTile(playerId, tile, isTsumogiri, handIdx);
 
@@ -1147,6 +1177,12 @@ function finalizeAgari(io, room, { agariResult, winnerId, isTsumo, fromPlayer })
   const isFever = !!(winner && winner.feverActive);
   const wasReached = !!(winner && winner.isReached);
   const wasIpatsu = !!(winner && winner.ipatsuActive);
+
+  // フェーズ7: 役満アガリを戦績にカウント
+  if (agariResult.yakuResult && agariResult.yakuResult.isYakuman && room.gameStats && room.gameStats[winnerId]) {
+    const yakumanCount = agariResult.yakuResult.yakumanCount || 1;
+    room.gameStats[winnerId].yakumanCount += yakumanCount;
+  }
 
   // 点棒移動を計算（FEVER で ×2 倍）
   const han = agariResult.yakuResult.totalHan;
@@ -1560,6 +1596,10 @@ function finalizeGameEnd(io, room, { reason, tobiPlayer }) {
   }));
   // 順位は点数降順
   const ranking = [...finalScores].sort((a, b) => b.score - a.score);
+  // 各プレイヤーに順位（1〜3）を付与
+  const rankMap = {};
+  ranking.forEach((r, idx) => { rankMap[r.id] = idx + 1; });
+
   io.to(roomChannel(room.id)).emit(S2C.GAME_GAME_END, {
     reason, // 'all-hands-done' | 'tobi'
     tobiPlayer: tobiPlayer || null,
@@ -1567,6 +1607,37 @@ function finalizeGameEnd(io, room, { reason, tobiPlayer }) {
     ranking,
   });
   room.state = 'ended';
+
+  // フェーズ7: 戦績を DB に書き込む
+  if (statsStore) {
+    try {
+      const players = engine.state.players.map((p, i) => {
+        const roomPlayer = room.players[i];
+        const stats = (room.gameStats && room.gameStats[p.id]) || { yakumanCount: 0, feverCount: 0 };
+        return {
+          id: roomPlayer ? roomPlayer.persistentPlayerId : null,
+          name: p.name,
+          score: p.score,
+          chips: p.chips,
+          rank: rankMap[p.id] || 3,
+          isCpu: !!roomPlayer && !!roomPlayer.isCpu,
+          yakumanCount: stats.yakumanCount,
+          feverCount: stats.feverCount,
+        };
+      });
+      const gameId = statsStore.recordGame({
+        roomId: room.id,
+        endReason: reason,
+        endedAt: Date.now(),
+        players,
+      });
+      if (gameId) {
+        console.log(`[戦績記録] gameId=${gameId} 終了理由=${reason}`);
+      }
+    } catch (err) {
+      console.warn(`[戦績記録] 失敗: ${err.message}`);
+    }
+  }
   console.log(`[対局終了] roomId=${room.id} 理由=${reason}`);
 }
 

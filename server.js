@@ -18,6 +18,7 @@ const { Server } = require('socket.io');
 
 const { RoomManager } = require('./src/room/manager');
 const { registerHandlers } = require('./src/socket/handlers');
+const { StatsStore } = require('./src/db/stats');
 
 // Express アプリと、その上に被せる HTTP サーバーを作成
 const app = express();
@@ -34,8 +35,21 @@ const io = new Server(server, {
 // public フォルダの中身をブラウザから直接見えるようにする
 //   例: public/index.html → http://localhost:3000/
 //       public/play.html  → http://localhost:3000/play.html
+//       public/stats.html → http://localhost:3000/stats.html
 // ------------------------------------------------------------
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ------------------------------------------------------------
+// 戦績ストアの初期化（フェーズ7）
+// 失敗してもサーバー全体は起動する（戦績は副機能）
+// ------------------------------------------------------------
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'fever-mj.json');
+const statsStore = new StatsStore(DB_PATH);
+if (statsStore.init()) {
+  console.log(`[戦績] 戦績ストア初期化: ${DB_PATH}`);
+} else {
+  console.warn('[戦績] 戦績ストア無効化（ファイル I/O 失敗）');
+}
 
 // ------------------------------------------------------------
 // ヘルスチェック用エンドポイント（Render など本番のスリープ防止）
@@ -45,7 +59,44 @@ app.get('/healthz', (req, res) => {
     status: 'ok',
     uptime: process.uptime(),
     rooms: roomManager.roomCount(),
+    statsEnabled: statsStore.enabled,
   });
+});
+
+// ------------------------------------------------------------
+// 戦績 API（フェーズ7）
+// ------------------------------------------------------------
+// プレイヤーの通算戦績
+app.get('/api/stats/:playerId', (req, res) => {
+  const playerId = String(req.params.playerId || '');
+  if (!statsStore.enabled) {
+    return res.status(503).json({ error: '戦績ストアが無効化されています' });
+  }
+  const stats = statsStore.getPlayerStats(playerId);
+  if (!stats) {
+    return res.status(404).json({ error: 'まだ対局記録がありません' });
+  }
+  res.json(stats);
+});
+
+// プレイヤーが参加した直近の対局一覧
+app.get('/api/games/:playerId', (req, res) => {
+  const playerId = String(req.params.playerId || '');
+  const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+  if (!statsStore.enabled) {
+    return res.status(503).json({ error: '戦績ストアが無効化されています' });
+  }
+  const games = statsStore.getRecentGames(playerId, limit);
+  res.json(games);
+});
+
+// 通算ランキング上位（全プレイヤー横断）
+app.get('/api/ranking', (req, res) => {
+  if (!statsStore.enabled) {
+    return res.status(503).json({ error: '戦績ストアが無効化されています' });
+  }
+  const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
+  res.json(statsStore.getRanking(limit));
 });
 
 // ------------------------------------------------------------
@@ -69,7 +120,7 @@ setInterval(() => {
 // ------------------------------------------------------------
 io.on('connection', (socket) => {
   console.log(`[接続] ${socket.id}`);
-  registerHandlers(io, socket, roomManager);
+  registerHandlers(io, socket, roomManager, statsStore);
 });
 
 // ------------------------------------------------------------

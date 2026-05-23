@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FEVER MJ - 戦績</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; min-height: 100vh;
+    background: radial-gradient(ellipse at center, #1a0033 0%, #000 100%);
+    color: white;
+    font-family: 'Yu Gothic', 'Hiragino Sans', sans-serif;
+  }
+  .app {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 20px 16px 48px;
+    min-height: 100vh;
+  }
+
+  h1 {
+    text-align: center;
+    font-size: 32px;
+    background: linear-gradient(45deg, #ff2d55, #ffd700, #ff00aa);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    margin-bottom: 4px;
+    letter-spacing: 2px;
+  }
+  .sub {
+    text-align: center;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+    margin-bottom: 20px;
+  }
+
+  .back-link {
+    display: inline-block;
+    color: #ffd700;
+    text-decoration: none;
+    font-size: 13px;
+    margin-bottom: 16px;
+    padding: 6px 10px;
+    border: 1px solid rgba(255, 215, 0, 0.3);
+    border-radius: 6px;
+  }
+  .back-link:hover { background: rgba(255, 215, 0, 0.1); }
+
+  .panel {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 215, 0, 0.3);
+    border-radius: 12px;
+    padding: 20px 18px;
+    margin-bottom: 14px;
+  }
+  .panel h2 {
+    font-size: 18px;
+    color: #ffd700;
+    margin-bottom: 14px;
+    border-bottom: 1px solid rgba(255, 215, 0, 0.2);
+    padding-bottom: 8px;
+  }
+
+  /* 通算戦績テーブル */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .stat-card {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .stat-label {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.55);
+    margin-bottom: 4px;
+  }
+  .stat-value {
+    font-size: 22px;
+    color: #ffd700;
+    font-weight: bold;
+    font-family: monospace;
+  }
+  .stat-sub {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-top: 2px;
+  }
+  .stat-value.gain  { color: #00e5ff; }
+  .stat-value.loss  { color: #ff8a9b; }
+  .stat-value.bronze { color: #ff8c00; }
+  .stat-value.silver { color: #d0d0d0; }
+
+  /* 名前ヘッダ */
+  .player-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 14px;
+  }
+  .player-name {
+    font-size: 18px;
+    color: #fff;
+    font-weight: bold;
+  }
+  .player-id {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.4);
+    font-family: monospace;
+  }
+
+  /* 最近の対局リスト */
+  .game-list { font-size: 13px; }
+  .game-row {
+    display: grid;
+    grid-template-columns: 90px 1fr auto;
+    gap: 8px;
+    align-items: center;
+    padding: 10px 10px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    margin-bottom: 6px;
+  }
+  .game-row .game-date {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.55);
+    font-family: monospace;
+  }
+  .game-row .game-players {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.7);
+  }
+  .game-row .my-result {
+    text-align: right;
+  }
+  .game-row .my-rank {
+    font-weight: bold;
+    font-size: 16px;
+    margin-right: 6px;
+  }
+  .game-row .my-rank.r1 { color: #ffd700; }
+  .game-row .my-rank.r2 { color: #d0d0d0; }
+  .game-row .my-rank.r3 { color: #ff8c00; }
+  .game-row .my-score {
+    font-family: monospace;
+    color: #00e5ff;
+  }
+
+  /* メッセージ */
+  .empty-msg {
+    text-align: center;
+    color: rgba(255, 255, 255, 0.5);
+    padding: 30px 10px;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  .empty-msg a { color: #ffd700; }
+
+  /* ローディング */
+  .loading {
+    text-align: center;
+    color: rgba(255, 255, 255, 0.6);
+    padding: 20px;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <a href="/" class="back-link">← ロビーに戻る</a>
+
+  <h1>📊 戦績</h1>
+  <div class="sub">あなたの通算成績と直近の対局履歴</div>
+
+  <!-- 通算戦績 -->
+  <div class="panel">
+    <div class="player-header">
+      <span class="player-name" id="player-name">読み込み中...</span>
+      <span class="player-id" id="player-id"></span>
+    </div>
+    <h2 style="margin-top:0;">通算成績</h2>
+    <div id="stats-body" class="loading">読み込み中…</div>
+  </div>
+
+  <!-- 直近の対局 -->
+  <div class="panel">
+    <h2>直近の対局</h2>
+    <div id="games-body" class="loading">読み込み中…</div>
+  </div>
+</div>
+
+<script src="/js/stats-page.js"></script>
+</body>
+</html>

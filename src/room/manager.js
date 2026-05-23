@@ -39,7 +39,7 @@ class RoomManager {
   }
 
   // 部屋を新規作成。同じ合言葉の待機中部屋があればエラー。
-  createRoom({ password, name, socketId }) {
+  createRoom({ password, name, socketId, persistentPlayerId }) {
     if (!password) throw new Error('合言葉を入力してください。');
     if (!name) throw new Error('名前を入力してください。');
 
@@ -60,6 +60,8 @@ class RoomManager {
       name,
       token,
       connected: true,
+      // フェーズ7: 戦績記録用の永続プレイヤーID（クライアントの localStorage 由来）
+      persistentPlayerId: persistentPlayerId || null,
     };
 
     const room = {
@@ -80,7 +82,7 @@ class RoomManager {
 
   // ソロ練習部屋を作成（人間1人＋CPU2人）。即対局開始用。
   // 合言葉は不要、他人は参加できない。
-  createSoloRoom({ name, socketId }) {
+  createSoloRoom({ name, socketId, persistentPlayerId }) {
     if (!name) throw new Error('名前を入力してください。');
 
     const roomId = this.idGen();
@@ -93,6 +95,7 @@ class RoomManager {
       token,
       connected: true,
       isCpu: false,
+      persistentPlayerId: persistentPlayerId || null,
     };
     const cpu1 = {
       id: PLAYER_IDS[1],
@@ -129,7 +132,7 @@ class RoomManager {
 
   // 既存の部屋に参加。合言葉一致する待機部屋がなければエラー。
   // 3人揃ったら state を 'starting' に遷移。
-  joinRoom({ password, name, socketId }) {
+  joinRoom({ password, name, socketId, persistentPlayerId }) {
     if (!password) throw new Error('合言葉を入力してください。');
     if (!name) throw new Error('名前を入力してください。');
 
@@ -158,6 +161,7 @@ class RoomManager {
       name,
       token,
       connected: true,
+      persistentPlayerId: persistentPlayerId || null,
     };
     targetRoom.players.push(player);
 
