@@ -109,18 +109,127 @@ fever-mj-server/
 
 ---
 
-## デプロイ（フェーズ7で実施）
+## 🌐 本番デプロイ
 
-### Render（無料プラン）
+無料で公開して友達と遊ぶには **Render** または **Railway** が使えます。
+本リポジトリは Render を推奨（`render.yaml` で自動構築できる設定済み）。
 
-1. GitHub にリポジトリをプッシュ
-2. Render で「New Web Service」→ リポジトリ選択
-3. Build Command: `npm install`
-4. Start Command: `npm start`
-5. 環境変数 `NODE_ENV=production` を設定
+### 環境変数
 
-> **スリープ対策**: Render 無料プランは 15 分無アクセスでスリープ。
-> UptimeRobot から 5 分間隔で `/healthz` を叩くと回避できます。
+| 変数名 | 必須? | 既定値 | 説明 |
+|---|---|---|---|
+| `PORT` | 自動 | `3000` | サーバーが listen するポート。Render が自動で渡してくる |
+| `HOST` | 任意 | `0.0.0.0` | バインドするホスト。本番では変更不要 |
+| `NODE_ENV` | 任意 | `development` | `production` にすると trust proxy 有効・起動ログ簡略化 |
+| `DB_PATH` | 任意 | `./data/fever-mj.json` | 戦績データの保存先 |
+
+`.env` ファイル（本番では使わない・ローカルのみ）の例は `.env.example` 参照。
+
+### ヘルスチェック
+
+スリープ防止用に **`/health`** と **`/healthz`** の 2 つを用意（中身は同じ）。
+レスポンス例：
+```json
+{
+  "status": "ok",
+  "uptime": 1234.5,
+  "rooms": 0,
+  "statsEnabled": true,
+  "nodeEnv": "production"
+}
+```
+
+---
+
+### 🚀 Render での公開手順（推奨）
+
+#### 1. GitHub にプッシュ
+
+ローカルで Git の初回設定（既にしてあるなら飛ばしてOK）：
+```bash
+git config --global user.name "あなたの名前"
+git config --global user.email "your-email@example.com"
+```
+
+GitHub で**新しいリポジトリ**を作成（公開/非公開どちらでも可）。リポジトリ名は例：`fever-mj-server`。
+そして以下を実行：
+```bash
+git remote add origin https://github.com/<あなたのユーザー名>/fever-mj-server.git
+git branch -M main
+git push -u origin main
+```
+
+> 💡 GitHub の認証方法はモダンでは **Personal Access Token** か **SSH キー**。
+> 詳細：<https://docs.github.com/ja/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token>
+
+#### 2. Render にサインアップ
+
+<https://render.com/> で GitHub アカウント連携してサインアップ（無料・クレカ不要）。
+
+#### 3. Web Service を作成
+
+ダッシュボードで **「New +」→「Web Service」** → さきほどの GitHub リポジトリを選択。
+
+Render は **`render.yaml` を自動検出**するので、以下の設定が自動で入ります：
+- Runtime: **Node**
+- Build Command: **`npm install --omit=dev`**
+- Start Command: **`npm start`**
+- Plan: **Free**
+- Health Check Path: **`/health`**
+- Env: `NODE_ENV=production`、`DB_PATH=./data/fever-mj.json`
+
+**「Create Web Service」** をクリック。初回ビルドに 2〜3 分。
+
+#### 4. 公開URL でアクセス
+
+ビルド完了後、`https://fever-mj-server-XXXX.onrender.com` のような URL が払い出されます。
+**スマホからもブラウザでアクセス可能**。友達に URL とロビーの合言葉を共有して 3 人対戦！
+
+#### 5. スリープ対策（任意）
+
+Render の Free プランは **15 分間アクセスがないと一時停止**し、復帰に 20〜30 秒かかります。
+これを避けるなら **UptimeRobot**（無料）で定期 ping：
+
+1. <https://uptimerobot.com/> でアカウント作成
+2. **「+ Add New Monitor」** → Type: **HTTP(s)**
+3. URL: `https://<your-app>.onrender.com/health`
+4. Monitoring Interval: **5 minutes**
+5. 保存
+
+> ⚠️ **既知の制約**: Free プランには永続ディスクがないため、**再デプロイ時に戦績データ（`data/fever-mj.json`）はリセット**されます。スリープ復帰では消えませんが、コード変更でデプロイされると消えます。
+> 戦績を恒久保存したい場合は Render の Disk Add-on（有料）、または外部 DB（Supabase, MongoDB Atlas など）への移行を検討してください。
+
+---
+
+### 🚂 Railway での公開手順（代替）
+
+Railway は試用クレジット（500 時間 / 月）の範囲で使えます。
+
+1. <https://railway.app/> で GitHub 連携してサインアップ
+2. **「New Project」→「Deploy from GitHub repo」** → リポジトリ選択
+3. 自動的に Node.js プロジェクトとして認識される
+4. **Settings** タブで以下の環境変数を追加：
+   - `NODE_ENV=production`
+   - `DB_PATH=./data/fever-mj.json`
+5. **Generate Domain** で公開 URL を発行
+
+> Railway は Render と違って `render.yaml` を読まないので、Build/Start コマンドが自動検出されない場合は手動で設定：
+> - Build: `npm install --omit=dev`
+> - Start: `npm start`
+
+---
+
+### 🧪 デプロイ後の動作確認チェックリスト
+
+公開後、以下を確認してください：
+
+- [ ] ブラウザで `https://<your-app>.onrender.com/` を開いてロビーが表示される
+- [ ] `/health` が `{"status":"ok",...}` を返す
+- [ ] ソロ練習で 1 局完走できる
+- [ ] スマホで同じ URL を開いて操作できる
+- [ ] 3 人（自分＋友達 2 人）で部屋に集まれる
+- [ ] 全 6 局を完走できる
+- [ ] 戦績画面（`/stats.html`）で記録が見える
 
 ---
 

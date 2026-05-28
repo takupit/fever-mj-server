@@ -24,8 +24,14 @@ const { StatsStore } = require('./src/db/stats');
 const app = express();
 const server = http.createServer(app);
 
+// 本番（Render など）はリバースプロキシ経由なので X-Forwarded-* ヘッダを信頼する
+// これでクライアント IP の取得や HTTPS リダイレクト判定が正しく動く
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
 // Socket.IO を HTTP サーバーに接続
-// cors: ブラウザのセキュリティ制限の設定（開発中は全許可で OK）
+// cors: 同一オリジンからの接続が主なので origin:'*' で問題ない（公開アプリ前提）
 const io = new Server(server, {
   cors: { origin: '*' },
 });
@@ -53,15 +59,19 @@ if (statsStore.init()) {
 
 // ------------------------------------------------------------
 // ヘルスチェック用エンドポイント（Render など本番のスリープ防止）
+//   /health と /healthz の両方で同じ内容を返す（汎用名 + Kubernetes 流）
 // ------------------------------------------------------------
-app.get('/healthz', (req, res) => {
-  res.json({
+function healthPayload() {
+  return {
     status: 'ok',
     uptime: process.uptime(),
     rooms: roomManager.roomCount(),
     statsEnabled: statsStore.enabled,
-  });
-});
+    nodeEnv: process.env.NODE_ENV || 'development',
+  };
+}
+app.get('/health',  (req, res) => res.json(healthPayload()));
+app.get('/healthz', (req, res) => res.json(healthPayload()));
 
 // ------------------------------------------------------------
 // 戦績 API（フェーズ7）
@@ -126,12 +136,20 @@ io.on('connection', (socket) => {
 // ------------------------------------------------------------
 // サーバー起動
 // ------------------------------------------------------------
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
+// 本番では Render が PORT を環境変数で渡してくる。0.0.0.0 にバインドしないと
+// 外部から見えないので明示的に指定する（ローカル開発でも問題なし）。
+const PORT = parseInt(process.env.PORT, 10) || 3000;
+const HOST = process.env.HOST || '0.0.0.0';
+server.listen(PORT, HOST, () => {
   console.log('==============================================');
   console.log('  FEVER MJ サーバーが起動しました');
-  console.log(`  ロビー: http://localhost:${PORT}/`);
-  console.log(`  対局:   http://localhost:${PORT}/play.html`);
+  console.log(`  リッスン: ${HOST}:${PORT}`);
+  if (process.env.NODE_ENV === 'production') {
+    console.log(`  本番モードで稼働中`);
+  } else {
+    console.log(`  ロビー: http://localhost:${PORT}/`);
+    console.log(`  戦績:   http://localhost:${PORT}/stats.html`);
+  }
   console.log('  停止: Ctrl + C');
   console.log('==============================================');
 });

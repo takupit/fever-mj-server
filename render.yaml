@@ -1,0 +1,29 @@
+# ============================================================
+# render.yaml
+# Render.com のインフラ設定。GitHub と連携すると、この yaml を元に
+# サービスが自動構築される（手動で UI から設定する代わりにできる）。
+# ============================================================
+# 詳細: https://render.com/docs/blueprint-spec
+# ============================================================
+
+services:
+  - type: web
+    name: fever-mj-server
+    runtime: node
+    # Free プランは月750時間まで無料。15分間アクセスなしでスリープに入る。
+    # スリープ復帰には約20-30秒かかる（UptimeRobot 等で定期 ping して回避可能）
+    plan: free
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    # /health にアクセスして 200 を返すかを Render が定期チェック
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # PORT は Render が自動で割り当てる（process.env.PORT で受け取る）
+      # DB_PATH を環境変数で上書き可能（既定: ./data/fever-mj.json）
+      #   注意: Free プランには永続ディスクが無いため、再デプロイで戦績データはリセットされる
+      - key: DB_PATH
+        value: ./data/fever-mj.json
+    # 自動デプロイ: GitHub の main ブランチに push されたら自動的に再ビルド
+    autoDeploy: true
