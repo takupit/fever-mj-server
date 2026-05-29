@@ -254,6 +254,14 @@ class RoomManager {
     return { room, player };
   }
 
+  // トークンを無効化する（再接続を打ち切る）
+  // CPU 代打が確定した瞬間に呼ぶ。以後そのトークンでの再接続を拒否する。
+  // 戻り値: 無効化した場合 true、もともと存在しなかった場合 false
+  invalidateToken(token) {
+    if (!token) return false;
+    return this.tokenToPlayer.delete(token);
+  }
+
   // 公開してよい情報だけを抜き出す（他人のトークン・ソケットID は隠す）
   publicView(room) {
     return {

@@ -126,6 +126,8 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
 
       // 3人揃ったら対局を開始
       if (isFull) {
+        // 戦績ストアを部屋に紐付け（finalizeGameEnd から参照できるように）
+        room.statsStore = statsStore;
         startGameInRoom(io, room);
       }
 
@@ -162,6 +164,8 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
       });
       console.log(`[ソロ練習開始] roomId=${room.id} human=${name}`);
 
+      // 戦績ストアを部屋に紐付け（finalizeGameEnd から参照できるように）
+      room.statsStore = statsStore;
       // 即対局開始
       startGameInRoom(io, room);
       if (typeof ack === 'function') ack({ ok: true });
@@ -276,6 +280,9 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
     try {
       const room = roomManager.getRoomBySocketId(socket.id);
       if (!room || !room.pendingClaim) throw new Error('鳴き応答中ではありません。');
+      if (room.state === 'hand-end' || room.state === 'ended') {
+        throw new Error('既に和了/流局済みです。');
+      }
       const playerInfo = roomManager.getPlayerInfoBySocketId(socket.id);
       if (!playerInfo) throw new Error('プレイヤー情報が見つかりません。');
       const claim = room.pendingClaim;
@@ -302,6 +309,9 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
     try {
       const room = roomManager.getRoomBySocketId(socket.id);
       if (!room || !room.gameEngine) throw new Error('対局が開始されていません。');
+      if (room.state === 'hand-end' || room.state === 'ended') {
+        throw new Error('既に和了/流局済みです。');
+      }
       const playerInfo = roomManager.getPlayerInfoBySocketId(socket.id);
       if (!playerInfo) throw new Error('プレイヤー情報が見つかりません。');
       const engine = room.gameEngine;
@@ -373,6 +383,9 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
       const room = roomManager.getRoomBySocketId(socket.id);
       if (!room || !room.gameEngine) throw new Error('対局が開始されていません。');
       if (room.pendingClaim) throw new Error('鳴き応答待ち中です。');
+      if (room.state === 'hand-end' || room.state === 'ended') {
+        throw new Error('既に和了/流局済みです。');
+      }
       const playerInfo = roomManager.getPlayerInfoBySocketId(socket.id);
       if (!playerInfo) throw new Error('プレイヤー情報が見つかりません。');
       const engine = room.gameEngine;
@@ -481,6 +494,9 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
     try {
       const room = roomManager.getRoomBySocketId(socket.id);
       if (!room || !room.pendingClaim) throw new Error('鳴き応答中ではありません。');
+      if (room.state === 'hand-end' || room.state === 'ended') {
+        throw new Error('既に和了/流局済みです。');
+      }
       const playerInfo = roomManager.getPlayerInfoBySocketId(socket.id);
       if (!playerInfo) throw new Error('プレイヤー情報が見つかりません。');
       const claim = room.pendingClaim;
@@ -528,6 +544,9 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
       if (!room || !room.pendingClaim || room.pendingClaim.type !== 'kita') {
         throw new Error('北抜き応答中ではありません。');
       }
+      if (room.state === 'hand-end' || room.state === 'ended') {
+        throw new Error('既に和了/流局済みです。');
+      }
       const playerInfo = roomManager.getPlayerInfoBySocketId(socket.id);
       if (!playerInfo) throw new Error('プレイヤー情報が見つかりません。');
       const eligibility = room.pendingClaim.eligible.get(playerInfo.playerId);
@@ -547,6 +566,9 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
       const room = roomManager.getRoomBySocketId(socket.id);
       if (!room || !room.pendingClaim || room.pendingClaim.type !== 'kita') {
         throw new Error('北抜き応答中ではありません。');
+      }
+      if (room.state === 'hand-end' || room.state === 'ended') {
+        throw new Error('既に和了/流局済みです。');
       }
       const playerInfo = roomManager.getPlayerInfoBySocketId(socket.id);
       if (!playerInfo) throw new Error('プレイヤー情報が見つかりません。');
@@ -591,6 +613,9 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
     try {
       const room = roomManager.getRoomBySocketId(socket.id);
       if (!room || !room.pendingClaim) throw new Error('鳴き応答中ではありません。');
+      if (room.state === 'hand-end' || room.state === 'ended') {
+        throw new Error('既に和了/流局済みです。');
+      }
       const playerInfo = roomManager.getPlayerInfoBySocketId(socket.id);
       if (!playerInfo) throw new Error('プレイヤー情報が見つかりません。');
       const claim = room.pendingClaim;
@@ -664,7 +689,8 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
           warePlayer: room.gameEngine.state.warePlayer,
         });
         socket.emit(S2C.GAME_YOUR_HAND, privateHandView(room.gameEngine.state, player.id));
-        socket.emit(S2C.GAME_STATE_UPDATE, publicGameView(room.gameEngine.state));
+        // room を渡すことで、他プレイヤーの接続状態（切断バッジ・CPU 代打フラグ）を正しく含める
+        socket.emit(S2C.GAME_STATE_UPDATE, publicGameView(room.gameEngine.state, room));
 
         // 自分のターン中なら your-turn も再送
         if (room.gameEngine.state.currentTurn === player.id && !room.pendingClaim) {
@@ -833,7 +859,11 @@ function buildYourTurnPayload(engine, playerId) {
 }
 
 // 次のプレイヤーへターンを進める（打牌後または鳴き応答終了後に呼ぶ）
+// hand-end / ended（局終了済み）のときは何もしない（二重進行防止）
 function progressToNextTurn(io, room) {
+  if (!room || !room.gameEngine) return;
+  // 局終了済み or 対局終了済みなら進めない
+  if (room.state !== 'in-game') return;
   const engine = room.gameEngine;
   engine.nextTurn();
   startTurnFor(io, room, engine.state.currentTurn);
@@ -1560,6 +1590,9 @@ function proceedToNextHand(io, room) {
   const playerNames = engine.state.players.map((p) => p.name);
   const scores = engine.state.players.map((p) => p.score);
   const chips = engine.state.players.map((p) => p.chips);
+  // 次局も CPU フラグを引き継ぐ（ソロ練習の CPU、および前局終了時に代打中だった人）
+  // 引き継がないと、ソロモードで2局目が止まる／代打中プレイヤーのターンが永久待機になる
+  const playerIsCpu = room.players.map((p) => !!p.isCpu || !!p.cpuTakeover);
   const newEngine = new GameEngine();
   newEngine.init(
     {
@@ -1567,7 +1600,7 @@ function proceedToNextHand(io, room) {
       roundWind: nextRound, hand: nextHand, honba: nextHonba,
       reachSticks: nextReachSticks, dealerId: nextDealerId,
     },
-    { playerNames, playerIsCpu: [false, false, false] }
+    { playerNames, playerIsCpu }
   );
   room.gameEngine = newEngine;
   room.state = 'in-game';
@@ -1609,6 +1642,8 @@ function finalizeGameEnd(io, room, { reason, tobiPlayer }) {
   room.state = 'ended';
 
   // フェーズ7: 戦績を DB に書き込む
+  // room.statsStore は startGameInRoom 直前に registerHandlers のクロージャから注入される
+  const statsStore = room.statsStore || null;
   if (statsStore) {
     try {
       const players = engine.state.players.map((p, i) => {
@@ -1620,7 +1655,8 @@ function finalizeGameEnd(io, room, { reason, tobiPlayer }) {
           score: p.score,
           chips: p.chips,
           rank: rankMap[p.id] || 3,
-          isCpu: !!roomPlayer && !!roomPlayer.isCpu,
+          // CPU 代打中の対局は本人の戦績として残らないように isCpu 扱いする
+          isCpu: !!roomPlayer && (!!roomPlayer.isCpu || !!roomPlayer.cpuTakeover),
           yakumanCount: stats.yakumanCount,
           feverCount: stats.feverCount,
         };
