@@ -125,12 +125,42 @@ function isChiitoitsuPattern(handTiles, melds = []) {
   return { type: 'chiitoitsu', pairs, sets: [], setTypes: [], isAnkou: [] };
 }
 
-// 通常パターン＋七対子パターンをまとめて返す
+// 国士無双の幺九牌（么九＝端牌＋字牌）13種
+const KOKUSHI_TILES = ['m1','m9','p1','p9','s1','s9','z1','z2','z3','z4','z5','z6','z7'];
+
+// 国士無双（13種すべて1枚以上＋うち1種が雀頭）パターンを判定。
+// 面前のみ。条件不一致なら null。
+function isKokushiPattern(handTiles, melds = []) {
+  if (melds.length > 0) return null; // 国士無双は面前のみ（暗カンも不可）
+  if (handTiles.length !== 14) return null;
+  const counts = countTiles(handTiles);
+  // 幺九牌以外が混ざっていたら NG
+  for (const k of Object.keys(counts)) {
+    if (!KOKUSHI_TILES.includes(k)) return null;
+  }
+  // 13種すべて1枚以上、かつちょうど1種が2枚（雀頭）
+  let pairTile = null;
+  for (const t of KOKUSHI_TILES) {
+    const c = counts[t] || 0;
+    if (c === 0) return null;
+    if (c === 2) {
+      if (pairTile) return null; // 2枚組が2種類以上 → NG
+      pairTile = t;
+    }
+    if (c > 2) return null;
+  }
+  if (!pairTile) return null;
+  return { type: 'kokushi', pairs: [[pairTile, pairTile]], sets: [], setTypes: [], isAnkou: [] };
+}
+
+// 通常パターン＋七対子パターン＋国士無双パターンをまとめて返す
 function extractAllPatterns(handTiles, melds = []) {
   const all = [];
   all.push(...extractStandardPatterns(handTiles, melds));
   const chiito = isChiitoitsuPattern(handTiles, melds);
   if (chiito) all.push(chiito);
+  const kokushi = isKokushiPattern(handTiles, melds);
+  if (kokushi) all.push(kokushi);
   return all;
 }
 
@@ -188,11 +218,131 @@ function isMenzen(melds) {
   return melds.every((m) => m.type === 'ankan');
 }
 
-// 1つのパターン（4面子1雀頭 or 七対子）について、すべての役を集計する。
+// 役満判定（パターン依存）。検出したら { name, han, yakumanCount } を返す。
+// 国士無双は extractAllPatterns で kokushi 型として渡ってくる。
+// 字一色は通常パターンと七対子パターンの両方で成立する。
+function detectYakumanInPattern(pattern, melds) {
+  // 国士無双（面前のみ・extractAllPatterns で生成）
+  if (pattern.type === 'kokushi') {
+    return { name: '国士無双', han: 13, yakumanCount: 1 };
+  }
+
+  // 七対子型で字一色
+  if (pattern.type === 'chiitoitsu') {
+    const allJihai = pattern.pairs.every((p) => isJihai(p[0]));
+    if (allJihai) return { name: '字一色', han: 13, yakumanCount: 1 };
+    return null; // 七対子からは他の役満は出ない
+  }
+
+  // 以降は通常パターン（4面子1雀頭）
+  // 副露は extractStandardPatterns で pattern.sets の先頭側に統合されているので、
+  // pattern.sets と pattern.pairs を見れば手牌＋副露の全体牌が分かる。
+  const allTiles = [];
+  pattern.pairs.forEach((p) => allTiles.push(...p));
+  pattern.sets.forEach((s) => allTiles.push(...s));
+
+  // 字一色: 全部字牌
+  if (allTiles.length > 0 && allTiles.every((t) => isJihai(t))) {
+    return { name: '字一色', han: 13, yakumanCount: 1 };
+  }
+
+  // 清老頭: 全部 1 か 9 の数牌（字牌混入なし）
+  if (allTiles.length > 0 && allTiles.every((t) => {
+    const base = tileBase(t);
+    if (isJihai(base)) return false;
+    const n = tileNumber(base);
+    return n === 1 || n === 9;
+  })) {
+    return { name: '清老頭', han: 13, yakumanCount: 1 };
+  }
+
+  // 刻子・槓子の代表牌一覧
+  const koutsuOrKantsuTiles = [];
+  pattern.sets.forEach((set, i) => {
+    if (pattern.setTypes[i] === 'koutsu' || pattern.setTypes[i] === 'kantsu') {
+      koutsuOrKantsuTiles.push(tileBase(set[0]));
+    }
+  });
+
+  // 大三元: 白發中すべて刻子（または槓子）
+  if (koutsuOrKantsuTiles.includes('z5') &&
+      koutsuOrKantsuTiles.includes('z6') &&
+      koutsuOrKantsuTiles.includes('z7')) {
+    return { name: '大三元', han: 13, yakumanCount: 1 };
+  }
+
+  // 大四喜: 東南西北 4 つすべて刻子
+  const fourWinds = ['z1', 'z2', 'z3', 'z4'];
+  if (fourWinds.every((w) => koutsuOrKantsuTiles.includes(w))) {
+    return { name: '大四喜', han: 26, yakumanCount: 2 };
+  }
+
+  // 小四喜: 風牌3刻子 + 残り1風牌の雀頭
+  const pairBase = pattern.pairs[0] ? tileBase(pattern.pairs[0][0]) : null;
+  const windsInKoutsu = fourWinds.filter((w) => koutsuOrKantsuTiles.includes(w));
+  if (windsInKoutsu.length === 3 && pairBase && fourWinds.includes(pairBase) &&
+      !windsInKoutsu.includes(pairBase)) {
+    return { name: '小四喜', han: 13, yakumanCount: 1 };
+  }
+
+  // 四槓子: 槓子（暗カン・明カン・加カン問わず）が 4 つ
+  const kantsuCount = pattern.setTypes.filter((t) => t === 'kantsu').length;
+  if (kantsuCount === 4) {
+    return { name: '四槓子', han: 13, yakumanCount: 1 };
+  }
+
+  // 九蓮宝燈: 面前・純粋萬子 or 筒子・形が 1112345678999 + 1 牌
+  // FEVER MJ では索子は s1/s9 しか存在しないので九蓮は萬子か筒子のみ可能
+  if (isMenzen(melds) && melds.length === 0) {
+    const suits = new Set();
+    for (const t of allTiles) {
+      const s = tileSuit(tileBase(t));
+      if (s === 'z') { suits.clear(); suits.add('z'); break; }
+      suits.add(s);
+    }
+    if (suits.size === 1) {
+      const suit = [...suits][0];
+      if (suit === 'm' || suit === 'p') {
+        const counts = countTiles(allTiles);
+        // 必要形: n=1 が 3 枚、n=2〜8 が各 1 枚、n=9 が 3 枚 → 計 13
+        // 和了形は 14 枚なので、上の必要形を満たし「いずれか 1 種だけ +1」になっていれば OK
+        const expected = { 1: 3, 2: 1, 3: 1, 4: 1, 5: 1, 6: 1, 7: 1, 8: 1, 9: 3 };
+        let extra = 0;
+        let valid = true;
+        for (let n = 1; n <= 9; n++) {
+          const key = `${suit}${n}`;
+          const have = counts[key] || 0;
+          const need = expected[n];
+          if (have < need || have > need + 1) { valid = false; break; }
+          extra += have - need;
+        }
+        if (valid && extra === 1) {
+          return { name: '九蓮宝燈', han: 13, yakumanCount: 1 };
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+// 1つのパターン（4面子1雀頭 or 七対子 or 国士無双）について、すべての役を集計する。
 // ctx の中身:
 //   isReached, reachType, ipatsuActive, feverActive, isTsumo, winningTile,
-//   roundWind ('E'/'S'/'W'), seatWind ('E'/'S'/'W'/'N'), waitType, doraIndicators
+//   roundWind ('E'/'S'/'W'), seatWind ('E'/'S'/'W'/'N'), waitType,
+//   doraIndicators, uraDoraIndicators
 function evaluateAllYaku(pattern, melds, kitaPulls, ctx) {
+  // ★ まず役満を先にチェック（成立したらドラなど他の役は加算しない・固定 13 翻）
+  const yakumanResult = detectYakumanInPattern(pattern, melds);
+  if (yakumanResult) {
+    return {
+      yakuList: [{ name: yakumanResult.name, han: yakumanResult.han }],
+      totalHan: yakumanResult.han,
+      isYakuman: true,
+      yakumanCount: yakumanResult.yakumanCount,
+    };
+  }
+
   const yakuList = [];
 
   // 立直系
@@ -209,12 +359,21 @@ function evaluateAllYaku(pattern, melds, kitaPulls, ctx) {
     yakuList.push({ name: '門前清自摸和', han: 1 });
   }
 
+  // 槍槓（チャンカン）：他家の加カンに対するロン和了で 1 翻
+  // 加カンの瞬間に他家がロンするケース。ctx.isChankan が立っているときのみ加算。
+  if (ctx.isChankan) {
+    yakuList.push({ name: '槍槓', han: 1 });
+  }
+
   // 平和（ピンフ）：面前・全順子・両面待ち・役牌でない雀頭
   if (isMenzen(melds) && pattern.type !== 'chiitoitsu') {
     const allShuntsu = pattern.setTypes.every((t) => t === 'shuntsu');
     const pairTile = pattern.pairs[0][0];
     const pairBase = tileBase(pairTile);
-    const isYakuhaiPair = ['z5','z6','z7','z4'].includes(pairBase) ||
+    // 役牌雀頭は平和不成立。
+    // 三元牌（白發中=z5/z6/z7）と場風・自風の雀頭が対象。
+    // z4（北）は雀頭そのものでは役牌にならないため除外（北抜き3枚 or 暗刻時のみ役牌）
+    const isYakuhaiPair = ['z5','z6','z7'].includes(pairBase) ||
       pairBase === windToTile(ctx.roundWind) ||
       pairBase === windToTile(ctx.seatWind);
     if (allShuntsu && !isYakuhaiPair && ctx.waitType === 'ryanmen') {
@@ -233,7 +392,8 @@ function evaluateAllYaku(pattern, melds, kitaPulls, ctx) {
   if (allKoutsuTiles.includes('z5')) yakuList.push({ name: '白', han: 1 });
   if (allKoutsuTiles.includes('z6')) yakuList.push({ name: '發', han: 1 });
   if (allKoutsuTiles.includes('z7')) yakuList.push({ name: '中', han: 1 });
-  if (allKoutsuTiles.includes('z4')) yakuList.push({ name: '北', han: 1 });
+  // 注: z4（北）は下の「北」判定セクションで一元的に評価する。
+  // ここで z4 を加算すると北抜き3枚＋北暗刻のケースで重複加算が発生する。
 
   const roundWindTile = windToTile(ctx.roundWind);
   const seatWindTile = windToTile(ctx.seatWind);
@@ -248,6 +408,7 @@ function evaluateAllYaku(pattern, melds, kitaPulls, ctx) {
   }
 
   // 北：役牌として1翻（北抜き3枚以上、または面前で北の暗刻）
+  // どちらか一方の条件を満たせば 1 翻。両方満たしても 1 翻のみ（重複加算しない）
   const isKitaPullThree = kitaPulls.length >= 3;
   const isMenzenKitaAnkou = isMenzen(melds) && pattern.sets.some((set, i) =>
     pattern.setTypes[i] === 'koutsu' && pattern.isAnkou[i] && set[0] === 'z4');
@@ -419,6 +580,17 @@ function evaluateAllYaku(pattern, melds, kitaPulls, ctx) {
   const akaCount = allTilesForDora.filter((t) => isRed(t)).length;
   if (akaCount > 0) yakuList.push({ name: `赤ドラ${akaCount}`, han: akaCount });
 
+  // 裏ドラ（リーチ和了時のみ計上）
+  // リーチしていなければ uraDoraIndicators の有無に関わらず加算しない（仕様）
+  if (ctx.isReached && ctx.uraDoraIndicators && ctx.uraDoraIndicators.length > 0) {
+    let uraCount = 0;
+    for (const ind of ctx.uraDoraIndicators) {
+      const uraTile = nextTile(ind);
+      uraCount += allTilesForDora.filter((t) => tileBase(t) === uraTile).length;
+    }
+    if (uraCount > 0) yakuList.push({ name: `裏ドラ${uraCount}`, han: uraCount });
+  }
+
   const totalHan = yakuList.reduce((sum, y) => sum + y.han, 0);
   return { yakuList, totalHan, isYakuman: false, yakumanCount: 0 };
 }
@@ -469,12 +641,15 @@ module.exports = {
   findSets,
   extractStandardPatterns,
   isChiitoitsuPattern,
+  isKokushiPattern,
   extractAllPatterns,
   isIndependentInPattern,
   detectFeverType,
   isMenzen,
+  detectYakumanInPattern,
   evaluateAllYaku,
   detectWaitType,
   isTenpai,
   getWaitingTiles,
+  KOKUSHI_TILES,
 };
