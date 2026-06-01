@@ -154,7 +154,15 @@ class GameEngine {
   }
 
   drawRinshan(playerId) {
-    if (this.state.rinshanIndex >= this.state.deadTiles.length) return null;
+    // 死牌領域（deadTiles 14枚）のレイアウト:
+    //   index 0,2    : 開始ドラ表示牌（2枚）
+    //   index 1,3    : 開始裏ドラ表示牌（2枚）
+    //   index 4〜7  : 嶺上牌（4枚＝カン回数の上限）
+    //   index 8,10,12: カンドラ追加表示牌（最大3枚）
+    //   index 9,11,13: カン裏ドラ追加表示牌（最大3枚）
+    // 嶺上は4枚まで（5回目以降は四開槓流局扱いになるので null を返す）
+    const RINSHAN_END = 8; // 嶺上領域は index 4〜7 の4枚分
+    if (this.state.rinshanIndex >= RINSHAN_END) return null;
     const player = this.state.players.find((p) => p.id === playerId);
 
     // 多牌防止：嶺上ツモ前に14枚以上あれば異常
@@ -175,6 +183,21 @@ class GameEngine {
       player.hand = [...sortedExceptLast, tile];
     }
     return tile;
+  }
+
+  // カンドラ・カン裏ドラを1枚ずつめくる（暗カン後・加カン/明カン後のロン応答完了後に呼ぶ）
+  // 死牌領域の構造に従ってドラと裏ドラを必ずペアで追加する。
+  // 上限を超えていたら何もしない（最大3回追加可能）。
+  addKanDora() {
+    // 現在何回追加したか（開始ドラ2枚を引いた数）
+    const added = this.state.doraIndicators.length - 2;
+    if (added < 0 || added >= 3) return; // 上限3回まで
+    // カンドラ表示牌の位置: 8, 10, 12（カン裏: 9, 11, 13）
+    const doraIdx = 8 + added * 2;
+    const uraIdx = 9 + added * 2;
+    if (doraIdx >= this.state.deadTiles.length || uraIdx >= this.state.deadTiles.length) return;
+    this.state.doraIndicators.push(this.state.deadTiles[doraIdx]);
+    this.state.uraDoraIndicators.push(this.state.deadTiles[uraIdx]);
   }
 
   discardTile(playerId, tile, isTsumogiri, handIdx = null) {
@@ -279,6 +302,7 @@ class GameEngine {
         seatWind: player.wind,
         waitType,
         doraIndicators: this.state.doraIndicators,
+        uraDoraIndicators: this.state.uraDoraIndicators,
       });
       if (yakuResult.totalHan === 0 && !yakuResult.isYakuman) continue;
       // 完全先付け：ドラのみのアガリは不可
@@ -341,8 +365,8 @@ class GameEngine {
 
     // ドラ計算（通常の手牌のドラ + 北抜き）
     let doraCount = 0;
+    const allTiles = [...player.hand];
     if (this.state.doraIndicators) {
-      const allTiles = [...player.hand];
       for (const ind of this.state.doraIndicators) {
         const doraTile = nextTile(ind);
         doraCount += allTiles.filter((t) => tileBase(t) === doraTile).length;
@@ -354,6 +378,16 @@ class GameEngine {
     doraCount += (player.kitaPulls || []).length;
     if (doraCount > 0) yakuList.push({ name: `ドラ${doraCount}`, han: doraCount });
 
+    // 裏ドラ（白ジョーカーはリーチが前提なので必ず計上）
+    if (this.state.uraDoraIndicators && this.state.uraDoraIndicators.length > 0) {
+      let uraCount = 0;
+      for (const ind of this.state.uraDoraIndicators) {
+        const uraTile = nextTile(ind);
+        uraCount += allTiles.filter((t) => tileBase(t) === uraTile).length;
+      }
+      if (uraCount > 0) yakuList.push({ name: `裏ドラ${uraCount}`, han: uraCount });
+    }
+
     const totalHan = yakuList.reduce((sum, y) => sum + y.han, 0);
 
     return {
@@ -362,6 +396,59 @@ class GameEngine {
       waitType: 'tanki',
       isHakuJoker: true,
     };
+  }
+
+  // チャンカン（加カンへのロン）判定。checkAgariRon と類似だが ctx.isChankan を立て、
+  // 槍槓 1 翻を加算する。返り値の構造も checkAgariRon と同じ。
+  // 注意: kakaningPlayer はまだ doKakan を呼んでいない状態（手牌に対象牌を保持中）
+  checkChankan(playerId, kakaningPlayerId, tile) {
+    const player = this.state.players.find((p) => p.id === playerId);
+    if (!player) return null;
+    const finalHand = [...player.hand, tile];
+    const patterns = extractAllPatterns(finalHand, player.melds);
+    if (patterns.length === 0) return null;
+
+    // フリテンチェック（通常のロンと同じ判定）
+    const waitTiles = getWaitingTiles(player.hand, player.melds);
+    const ownDiscards = player.discards.map((d) => tileBase(d.tile));
+    const isFuriten = waitTiles.some((w) => ownDiscards.includes(tileBase(w)));
+    const hasMissedRon = (player.missedRonTiles || []).map((t) => tileBase(t)).includes(tileBase(tile));
+    if (isFuriten || hasMissedRon) return { canRon: false, reason: 'furiten' };
+    if (player.reachType === 'furiten') return { canRon: false, reason: 'furiten_reach' };
+
+    let bestResult = null;
+    for (const pattern of patterns) {
+      const waitType = detectWaitType(pattern, tile);
+      const yakuResult = evaluateAllYaku(pattern, player.melds, player.kitaPulls, {
+        isReached: player.isReached,
+        reachType: player.reachType,
+        ipatsuActive: player.ipatsuActive,
+        feverActive: player.feverActive,
+        isTsumo: false,
+        isChankan: true,  // ★ 槍槓フラグ
+        winningTile: tile,
+        roundWind: this.state.roundWind,
+        seatWind: player.wind,
+        waitType,
+        doraIndicators: this.state.doraIndicators,
+        uraDoraIndicators: this.state.uraDoraIndicators,
+      });
+      if (yakuResult.totalHan === 0 && !yakuResult.isYakuman) continue;
+      // 完全先付け：槍槓 1 翻があるのでドラのみアガリにはならないが、保険で確認
+      const nonDoraYaku = yakuResult.yakuList.filter((y) =>
+        !y.name.startsWith('ドラ') &&
+        !y.name.startsWith('赤ドラ') &&
+        !y.name.startsWith('裏ドラ') &&
+        !y.name.startsWith('抜きドラ') &&
+        !y.name.startsWith('北抜きドラ')
+      );
+      if (nonDoraYaku.length === 0 && !yakuResult.isYakuman) continue;
+      if (!bestResult || yakuResult.totalHan > bestResult.yakuResult.totalHan) {
+        bestResult = { pattern, yakuResult, waitType };
+      }
+    }
+    if (!bestResult) return null;
+    return { canRon: true, isChankan: true, ...bestResult };
   }
 
   checkAgariRon(playerId, winningTile, fromPlayer) {
@@ -393,6 +480,7 @@ class GameEngine {
         seatWind: player.wind,
         waitType,
         doraIndicators: this.state.doraIndicators,
+        uraDoraIndicators: this.state.uraDoraIndicators,
       });
       if (yakuResult.totalHan === 0 && !yakuResult.isYakuman) continue;
       // 完全先付け：ドラのみのアガリは不可
@@ -545,10 +633,8 @@ class GameEngine {
       fromPlayer: null,
     });
 
-    // 暗カンでカンドラ即めくり
-    if (this.state.rinshanIndex < this.state.deadTiles.length - 4) {
-      this.state.doraIndicators.push(this.state.deadTiles[this.state.doraIndicators.length * 2 + 4]);
-    }
+    // 暗カン: カンドラ＆カン裏ドラを即めくる
+    this.addKanDora();
 
     if (!player.isCpu) {
       player.hand = sortTiles(player.hand);

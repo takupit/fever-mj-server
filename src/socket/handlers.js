@@ -126,6 +126,8 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
 
       // 3人揃ったら対局を開始
       if (isFull) {
+        // 戦績ストアを部屋に紐付け（finalizeGameEnd から参照できるように）
+        room.statsStore = statsStore;
         startGameInRoom(io, room);
       }
 
@@ -162,6 +164,8 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
       });
       console.log(`[ソロ練習開始] roomId=${room.id} human=${name}`);
 
+      // 戦績ストアを部屋に紐付け（finalizeGameEnd から参照できるように）
+      room.statsStore = statsStore;
       // 即対局開始
       startGameInRoom(io, room);
       if (typeof ack === 'function') ack({ ok: true });
@@ -276,6 +280,9 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
     try {
       const room = roomManager.getRoomBySocketId(socket.id);
       if (!room || !room.pendingClaim) throw new Error('鳴き応答中ではありません。');
+      if (room.state === 'hand-end' || room.state === 'ended') {
+        throw new Error('既に和了/流局済みです。');
+      }
       const playerInfo = roomManager.getPlayerInfoBySocketId(socket.id);
       if (!playerInfo) throw new Error('プレイヤー情報が見つかりません。');
       const claim = room.pendingClaim;
@@ -302,6 +309,9 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
     try {
       const room = roomManager.getRoomBySocketId(socket.id);
       if (!room || !room.gameEngine) throw new Error('対局が開始されていません。');
+      if (room.state === 'hand-end' || room.state === 'ended') {
+        throw new Error('既に和了/流局済みです。');
+      }
       const playerInfo = roomManager.getPlayerInfoBySocketId(socket.id);
       if (!playerInfo) throw new Error('プレイヤー情報が見つかりません。');
       const engine = room.gameEngine;
@@ -326,6 +336,23 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
         }
         const tile = payload.tile;
         if (!tile) throw new Error('カン対象の牌を指定してください。');
+
+        if (type === 'kakan') {
+          // 加カン: 他家にチャンカン（槍槓ロン）の応答チャンスを与える
+          // 事前に候補チェック
+          const candidates = engine.getKakanCandidates(myPlayerId);
+          if (!candidates.includes(tile)) throw new Error('その牌で加カンできません。');
+
+          // チャンカン可能な他家がいれば応答待ちに入る
+          const chankanStarted = startChankanClaim(io, room, myPlayerId, tile);
+          if (chankanStarted) {
+            // 応答待ちに入った → 後の処理は resolveChankanClaim に委ねる
+            if (typeof ack === 'function') ack({ ok: true });
+            return;
+          }
+          // 誰もチャンカンできない → 通常通り加カン実行へフォールスルー
+        }
+
         const doneOk = type === 'ankan'
           ? engine.doAnkan(myPlayerId, tile)
           : engine.doKakan(myPlayerId, tile);
@@ -373,6 +400,9 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
       const room = roomManager.getRoomBySocketId(socket.id);
       if (!room || !room.gameEngine) throw new Error('対局が開始されていません。');
       if (room.pendingClaim) throw new Error('鳴き応答待ち中です。');
+      if (room.state === 'hand-end' || room.state === 'ended') {
+        throw new Error('既に和了/流局済みです。');
+      }
       const playerInfo = roomManager.getPlayerInfoBySocketId(socket.id);
       if (!playerInfo) throw new Error('プレイヤー情報が見つかりません。');
       const engine = room.gameEngine;
@@ -481,13 +511,21 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
     try {
       const room = roomManager.getRoomBySocketId(socket.id);
       if (!room || !room.pendingClaim) throw new Error('鳴き応答中ではありません。');
+      if (room.state === 'hand-end' || room.state === 'ended') {
+        throw new Error('既に和了/流局済みです。');
+      }
       const playerInfo = roomManager.getPlayerInfoBySocketId(socket.id);
       if (!playerInfo) throw new Error('プレイヤー情報が見つかりません。');
       const claim = room.pendingClaim;
       const eligibility = claim.eligible.get(playerInfo.playerId);
       if (!eligibility || !eligibility.canRon) throw new Error('この打牌でロンできません。');
       claim.responses.set(playerInfo.playerId, { action: 'ron' });
-      tryResolveClaim(io, room);
+      // 応答種別に応じて解決ルートを分岐（通常ロン / 槍槓ロン）
+      if (claim.type === 'chankan') {
+        tryResolveChankanClaim(io, room);
+      } else {
+        tryResolveClaim(io, room);
+      }
       if (typeof ack === 'function') ack({ ok: true });
     } catch (err) {
       socket.emit(S2C.LOBBY_ERROR, { message: err.message });
@@ -528,6 +566,9 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
       if (!room || !room.pendingClaim || room.pendingClaim.type !== 'kita') {
         throw new Error('北抜き応答中ではありません。');
       }
+      if (room.state === 'hand-end' || room.state === 'ended') {
+        throw new Error('既に和了/流局済みです。');
+      }
       const playerInfo = roomManager.getPlayerInfoBySocketId(socket.id);
       if (!playerInfo) throw new Error('プレイヤー情報が見つかりません。');
       const eligibility = room.pendingClaim.eligible.get(playerInfo.playerId);
@@ -547,6 +588,9 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
       const room = roomManager.getRoomBySocketId(socket.id);
       if (!room || !room.pendingClaim || room.pendingClaim.type !== 'kita') {
         throw new Error('北抜き応答中ではありません。');
+      }
+      if (room.state === 'hand-end' || room.state === 'ended') {
+        throw new Error('既に和了/流局済みです。');
       }
       const playerInfo = roomManager.getPlayerInfoBySocketId(socket.id);
       if (!playerInfo) throw new Error('プレイヤー情報が見つかりません。');
@@ -591,13 +635,19 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
     try {
       const room = roomManager.getRoomBySocketId(socket.id);
       if (!room || !room.pendingClaim) throw new Error('鳴き応答中ではありません。');
+      if (room.state === 'hand-end' || room.state === 'ended') {
+        throw new Error('既に和了/流局済みです。');
+      }
       const playerInfo = roomManager.getPlayerInfoBySocketId(socket.id);
       if (!playerInfo) throw new Error('プレイヤー情報が見つかりません。');
       const claim = room.pendingClaim;
       if (!claim.eligible.has(playerInfo.playerId)) return;
       claim.responses.set(playerInfo.playerId, { action: 'skip' });
+      // 応答種別ごとの解決ルートを分岐
       if (claim.type === 'kita') {
         tryResolveKitaClaim(io, room);
+      } else if (claim.type === 'chankan') {
+        tryResolveChankanClaim(io, room);
       } else {
         tryResolveClaim(io, room);
       }
@@ -664,7 +714,8 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
           warePlayer: room.gameEngine.state.warePlayer,
         });
         socket.emit(S2C.GAME_YOUR_HAND, privateHandView(room.gameEngine.state, player.id));
-        socket.emit(S2C.GAME_STATE_UPDATE, publicGameView(room.gameEngine.state));
+        // room を渡すことで、他プレイヤーの接続状態（切断バッジ・CPU 代打フラグ）を正しく含める
+        socket.emit(S2C.GAME_STATE_UPDATE, publicGameView(room.gameEngine.state, room));
 
         // 自分のターン中なら your-turn も再送
         if (room.gameEngine.state.currentTurn === player.id && !room.pendingClaim) {
@@ -833,7 +884,11 @@ function buildYourTurnPayload(engine, playerId) {
 }
 
 // 次のプレイヤーへターンを進める（打牌後または鳴き応答終了後に呼ぶ）
+// hand-end / ended（局終了済み）のときは何もしない（二重進行防止）
 function progressToNextTurn(io, room) {
+  if (!room || !room.gameEngine) return;
+  // 局終了済み or 対局終了済みなら進めない
+  if (room.state !== 'in-game') return;
   const engine = room.gameEngine;
   engine.nextTurn();
   startTurnFor(io, room, engine.state.currentTurn);
@@ -1137,6 +1192,162 @@ function resolveClaim(io, room) {
   }
 
   console.log(`[鳴き成立] roomId=${room.id} ${winner.action}=${winner.playerId} 牌=${claim.tile}`);
+}
+
+// -----------------------------------------------------------------
+// チャンカン（加カンへのロン）応答フロー
+//   - 加カン宣言時に、他家が「待ち牌に加カン対象牌が含まれる」場合に
+//     ロンで割り込めるようにする（槍槓 1 翻）
+//   - 通常の鳴き応答とは流れが違うので別経路で処理する。
+// -----------------------------------------------------------------
+
+// 加カン宣言時にチャンカン可能な他家がいるか確認し、いれば応答待ち開始。
+// 戻り値: 応答待ちが始まったら true、誰もチャンカンできなければ false
+function startChankanClaim(io, room, kakaningPlayerId, tile) {
+  const engine = room.gameEngine;
+  const eligible = new Map();
+  for (const p of engine.state.players) {
+    if (p.id === kakaningPlayerId) continue;
+    const result = engine.checkChankan(p.id, kakaningPlayerId, tile);
+    if (result && result.canRon) {
+      // canPon/canMinkan は チャンカンでは使わないが、UI で再接続時に
+      // GAME_WAITING_CLAIM の options を組み立てる用に空フィールドを持たせる
+      eligible.set(p.id, { canRon: true, canPon: false, canMinkan: false, canKan: false, ronResult: result });
+    }
+  }
+  if (eligible.size === 0) return false;
+
+  room.pendingClaim = {
+    type: 'chankan',
+    kakaningPlayerId,
+    discarderId: kakaningPlayerId, // UI 上の「振り込み者」は加カン者
+    fromPlayerId: kakaningPlayerId,
+    tile,
+    eligible,
+    responses: new Map(),
+    timeoutId: null,
+  };
+
+  // 該当プレイヤーだけに通知
+  for (const [pid] of eligible) {
+    const rp = room.players.find((p) => p.id === pid);
+    if (rp && rp.socketId) {
+      io.to(rp.socketId).emit(S2C.GAME_WAITING_CLAIM, {
+        type: 'chankan',
+        discardingPlayer: kakaningPlayerId,
+        fromPlayer: kakaningPlayerId,
+        tile,
+        options: ['ron', 'skip'],
+        timeoutMs: CLAIM_TIMEOUT_MS,
+      });
+    }
+  }
+
+  // タイムアウト後に強制解決
+  room.pendingClaim.timeoutId = setTimeout(() => {
+    resolveChankanClaim(io, room);
+  }, CLAIM_TIMEOUT_MS);
+
+  // CPU 対象者は短い思考時間でロン判断（基本ロン可能なら必ずロンする）
+  for (const [pid] of eligible) {
+    const enginePlayer = engine.state.players.find((p) => p.id === pid);
+    if (enginePlayer && enginePlayer.isCpu) {
+      setTimeout(() => {
+        if (!room.pendingClaim || room.pendingClaim.type !== 'chankan') return;
+        if (room.pendingClaim.responses.has(pid)) return;
+        room.pendingClaim.responses.set(pid, { action: 'ron' });
+        tryResolveChankanClaim(io, room);
+      }, CPU_THINK_MS_MIN + Math.random() * 400);
+    }
+  }
+
+  console.log(`[槍槓応答待ち] roomId=${room.id} 加カン者=${kakaningPlayerId} 牌=${tile} 対象=${[...eligible.keys()].join(',')}`);
+  return true;
+}
+
+// 全員から応答が揃ったら即時解決する（タイムアウト前でも）
+function tryResolveChankanClaim(io, room) {
+  const claim = room.pendingClaim;
+  if (!claim || claim.type !== 'chankan') return;
+  const allResponded = [...claim.eligible.keys()].every((pid) => claim.responses.has(pid));
+  if (allResponded) {
+    if (claim.timeoutId) clearTimeout(claim.timeoutId);
+    resolveChankanClaim(io, room);
+  }
+}
+
+// チャンカン応答を確定し、ロン成立 or 加カン続行に分岐
+function resolveChankanClaim(io, room) {
+  const claim = room.pendingClaim;
+  if (!claim || claim.type !== 'chankan') return;
+  if (claim.timeoutId) clearTimeout(claim.timeoutId);
+
+  const engine = room.gameEngine;
+  const kakaningPlayerId = claim.kakaningPlayerId;
+  const tile = claim.tile;
+
+  // ロン優先で勝者を確定（加カン者の上家を優先する標準ルール）
+  const order = ['P0', 'P1', 'P2'];
+  const discIdx = order.indexOf(kakaningPlayerId);
+  const sortedPids = [order[(discIdx + 1) % 3], order[(discIdx + 2) % 3]]
+    .filter((pid) => claim.eligible.has(pid));
+  let ronWinnerId = null;
+  for (const pid of sortedPids) {
+    const resp = claim.responses.get(pid);
+    if (resp && resp.action === 'ron') { ronWinnerId = pid; break; }
+  }
+
+  room.pendingClaim = null;
+
+  if (ronWinnerId) {
+    // 槍槓ロン成立
+    const eligibility = claim.eligible.get(ronWinnerId);
+    finalizeAgari(io, room, {
+      agariResult: eligibility.ronResult,
+      winnerId: ronWinnerId,
+      isTsumo: false,
+      fromPlayer: kakaningPlayerId,
+    });
+    return;
+  }
+
+  // 誰もロンしなかった → 加カン処理を実行して通常進行
+  const ok = engine.doKakan(kakaningPlayerId, tile);
+  if (!ok) {
+    console.warn(`[槍槓応答後] doKakan 失敗: roomId=${room.id} player=${kakaningPlayerId} tile=${tile}`);
+    progressToNextTurn(io, room);
+    return;
+  }
+
+  io.to(roomChannel(room.id)).emit(S2C.GAME_ACTION_RESULT, {
+    action: 'kakan',
+    playerId: kakaningPlayerId,
+    tile,
+  });
+
+  // 嶺上ツモ → 加カン者にあなたのターン通知
+  engine.drawRinshan(kakaningPlayerId);
+  const roomPlayer = room.players.find((p) => p.id === kakaningPlayerId);
+  if (roomPlayer && roomPlayer.socketId) {
+    io.to(roomPlayer.socketId).emit(
+      S2C.GAME_YOUR_HAND,
+      privateHandView(engine.state, kakaningPlayerId)
+    );
+    io.to(roomPlayer.socketId).emit(
+      S2C.GAME_YOUR_TURN,
+      buildYourTurnPayloadAfterCall(engine, kakaningPlayerId)
+    );
+  }
+  io.to(roomChannel(room.id)).emit(
+    S2C.GAME_STATE_UPDATE,
+    publicGameView(engine.state, room)
+  );
+
+  // 加カン後のターンが CPU なら自動打牌をスケジュール
+  const enginePlayer = engine.state.players.find((p) => p.id === kakaningPlayerId);
+  if (enginePlayer && enginePlayer.isCpu) {
+    scheduleCpuTurn(io, room, kakaningPlayerId);
+  }
 }
 
 // 鳴き後の打牌で使える選択肢（リーチは原則不可なので除外）
@@ -1560,6 +1771,9 @@ function proceedToNextHand(io, room) {
   const playerNames = engine.state.players.map((p) => p.name);
   const scores = engine.state.players.map((p) => p.score);
   const chips = engine.state.players.map((p) => p.chips);
+  // 次局も CPU フラグを引き継ぐ（ソロ練習の CPU、および前局終了時に代打中だった人）
+  // 引き継がないと、ソロモードで2局目が止まる／代打中プレイヤーのターンが永久待機になる
+  const playerIsCpu = room.players.map((p) => !!p.isCpu || !!p.cpuTakeover);
   const newEngine = new GameEngine();
   newEngine.init(
     {
@@ -1567,7 +1781,7 @@ function proceedToNextHand(io, room) {
       roundWind: nextRound, hand: nextHand, honba: nextHonba,
       reachSticks: nextReachSticks, dealerId: nextDealerId,
     },
-    { playerNames, playerIsCpu: [false, false, false] }
+    { playerNames, playerIsCpu }
   );
   room.gameEngine = newEngine;
   room.state = 'in-game';
@@ -1609,6 +1823,8 @@ function finalizeGameEnd(io, room, { reason, tobiPlayer }) {
   room.state = 'ended';
 
   // フェーズ7: 戦績を DB に書き込む
+  // room.statsStore は startGameInRoom 直前に registerHandlers のクロージャから注入される
+  const statsStore = room.statsStore || null;
   if (statsStore) {
     try {
       const players = engine.state.players.map((p, i) => {
@@ -1620,7 +1836,8 @@ function finalizeGameEnd(io, room, { reason, tobiPlayer }) {
           score: p.score,
           chips: p.chips,
           rank: rankMap[p.id] || 3,
-          isCpu: !!roomPlayer && !!roomPlayer.isCpu,
+          // CPU 代打中の対局は本人の戦績として残らないように isCpu 扱いする
+          isCpu: !!roomPlayer && (!!roomPlayer.isCpu || !!roomPlayer.cpuTakeover),
           yakumanCount: stats.yakumanCount,
           feverCount: stats.feverCount,
         };

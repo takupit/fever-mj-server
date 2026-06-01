@@ -81,6 +81,28 @@
     );
   }
 
+  // ===== 送信ボタンの二重送信防止ロック =====
+  // 連打や Enter キー連打で send が複数回飛ぶのを防ぐ。
+  //   - クリック直後に disabled=true にする
+  //   - サーバー応答（成功/エラー）または 5 秒のフォールバックで解除
+  let pendingButton = null;
+  let pendingTimer = null;
+  function lockButton(btn) {
+    if (!btn) return;
+    btn.disabled = true;
+    pendingButton = btn;
+    if (pendingTimer) clearTimeout(pendingTimer);
+    // フォールバック: 5 秒経っても解除されなければ強制解除（通信遅延の保険）
+    pendingTimer = setTimeout(unlockPendingButton, 5000);
+  }
+  function unlockPendingButton() {
+    if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; }
+    if (pendingButton) {
+      pendingButton.disabled = false;
+      pendingButton = null;
+    }
+  }
+
   // ===== ボタンの紐付け =====
   function bindButtons() {
     // メニュー
@@ -90,8 +112,11 @@
 
     // ソロ練習
     $('#solo-submit').addEventListener('click', () => {
+      const btn = $('#solo-submit');
+      if (btn.disabled) return; // 多重防止
       const name = $('#solo-name').value.trim();
       if (!name) { toast('名前を入力してください', 'error'); return; }
+      lockButton(btn);
       fm.sendCreateSoloRoom({ name });
     });
     $('#solo-name').addEventListener('keydown', (e) => {
@@ -105,23 +130,29 @@
 
     // 部屋作成
     $('#create-submit').addEventListener('click', () => {
+      const btn = $('#create-submit');
+      if (btn.disabled) return; // 多重防止
       const name = $('#create-name').value.trim();
       const password = $('#create-password').value.trim();
       if (!name || !password) {
         toast('名前と合言葉を入力してください', 'error');
         return;
       }
+      lockButton(btn);
       fm.sendCreateRoom({ name, password });
     });
 
     // 部屋参加
     $('#join-submit').addEventListener('click', () => {
+      const btn = $('#join-submit');
+      if (btn.disabled) return; // 多重防止
       const name = $('#join-name').value.trim();
       const password = $('#join-password').value.trim();
       if (!name || !password) {
         toast('名前と合言葉を入力してください', 'error');
         return;
       }
+      lockButton(btn);
       fm.sendJoinRoom({ name, password });
     });
 
@@ -154,6 +185,7 @@
 
     // 部屋作成成功
     fm.on('lobby:room-created', ({ room }) => {
+      unlockPendingButton(); // 送信ロック解除
       $('#waiting-title').textContent = '対局メンバー待ち（あなたが部屋を作りました）';
       updateWaitingView(room, fm.state.playerId);
       showView('view-waiting');
@@ -162,6 +194,7 @@
 
     // 部屋参加成功（新規参加 / 再接続 両方扱う）
     fm.on('lobby:room-joined', ({ room, reconnected }) => {
+      unlockPendingButton(); // 送信ロック解除
       if (reconnected) {
         // フェーズ6: 再接続時は対局画面に直接戻る
         showView('view-game');
@@ -188,6 +221,7 @@
 
     // エラー
     fm.on('lobby:error', ({ message }) => {
+      unlockPendingButton(); // 送信ロック解除（やり直し可能に）
       toast(message, 'error');
     });
 

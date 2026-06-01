@@ -71,13 +71,20 @@ function windToTile(wind) {
 }
 
 // ドラ表示牌から「実際のドラ」を求める（表示牌の次の牌）
-//   数牌: 9 → 1 にループ
+//   萬子・筒子: 9 → 1 にループ
+//   索子: FEVER MJ では s1, s9 しか存在しないため s1 ↔ s9 で交互ループ
 //   風牌(z1〜z4): 北 → 東 にループ
 //   三元牌(z5〜z7): 中 → 白 にループ
 function nextTile(indicator) {
   const base = tileBase(indicator);
   const suit = tileSuit(base);
   if (isShuupai(base)) {
+    // 索子は s1 と s9 しか牌山に存在しないので、特例で s1↔s9 を循環させる
+    // 通常通り「次の数」を返すと存在しない s2 等を指してしまい、ドラが死ぬ
+    if (suit === 's') {
+      const num = tileNumber(base);
+      return num === 1 ? 's9' : 's1';
+    }
     const num = tileNumber(base);
     const next = num === 9 ? 1 : num + 1;
     return `${suit}${next}`;
