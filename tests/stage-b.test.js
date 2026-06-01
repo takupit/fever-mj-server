@@ -282,6 +282,134 @@ test('#8 大四喜: 東南西北すべて刻子（ダブル役満 26翻）', () 
 });
 
 // ============================================================
+// 役満のチップ報酬（仕様: 純正役満=10枚ALL、W役満=20枚ALL、数え役満=5枚ALL）
+// chip.js 既存ルール③が、ステージBで追加した役満でも正しく動くか保証する
+// ============================================================
+
+const { GameEngine } = require('../src/game/engine');
+const { calculateChipMoves } = require('../src/game/chip');
+
+function makeYakumanResult(name, han = 13, yakumanCount = 1) {
+  return {
+    pattern: { sets: [], pairs: [], setTypes: [] },
+    yakuResult: {
+      yakuList: [{ name, han }],
+      totalHan: han,
+      isYakuman: true,
+      yakumanCount,
+    },
+    waitType: 'tanki',
+  };
+}
+
+function makeKazoeYakumanResult(totalHan) {
+  return {
+    pattern: { sets: [], pairs: [], setTypes: [] },
+    yakuResult: {
+      yakuList: [{ name: '立直', han: 1 }, { name: `ドラ${totalHan - 1}`, han: totalHan - 1 }],
+      totalHan,
+      isYakuman: false,
+      yakumanCount: 0,
+    },
+    waitType: 'tanki',
+  };
+}
+
+test('チップ: 純正役満ツモは 10 枚 ALL（他家2人から各10枚）', () => {
+  const engine = new GameEngine();
+  engine.init();
+  const p0 = engine.state.players[0];
+  // 適当な手牌（チップ ①②に該当しないように：七筒なし・字牌中心）
+  p0.hand = ['z1','z1','z1','z2','z2','z2','z3','z3','z3','z5','z5','z5','m1','m1'];
+  engine.state.drawnTile = 'm1';
+  engine.state.lastDiscard = null;
+  const result = calculateChipMoves({
+    state: engine.state,
+    agariResult: makeYakumanResult('字一色', 13, 1),
+    winnerId: 'P0',
+    isTsumo: true,
+  });
+  // 純正役満 → 10枚 ALL
+  assert.strictEqual(result.moves.P1, -10);
+  assert.strictEqual(result.moves.P2, -10);
+  assert.strictEqual(result.moves.P0, 20);
+  assert.strictEqual(result.breakdown.rule3, 20);
+});
+
+test('チップ: 純正役満ロンも 10 枚 ALL（全員から徴収）', () => {
+  const engine = new GameEngine();
+  engine.init();
+  const p0 = engine.state.players[0];
+  p0.hand = ['m1','m9','p1','p9','s1','s9','z1','z2','z3','z4','z5','z6','z7']; // 13枚（国士想定）
+  engine.state.drawnTile = null;
+  engine.state.lastDiscard = { player: 'P1', tile: 'z1' };
+  const result = calculateChipMoves({
+    state: engine.state,
+    agariResult: makeYakumanResult('国士無双', 13, 1),
+    winnerId: 'P0',
+    isTsumo: false,
+    fromPlayer: 'P1',
+  });
+  // 役満ロンでも ALL なので「ロン振り込み者だけ」ではなく全員から
+  assert.strictEqual(result.moves.P1, -10);
+  assert.strictEqual(result.moves.P2, -10);
+  assert.strictEqual(result.moves.P0, 20);
+});
+
+test('チップ: W役満（大四喜）は 20 枚 ALL（10×2）', () => {
+  const engine = new GameEngine();
+  engine.init();
+  const p0 = engine.state.players[0];
+  p0.hand = ['z1','z1','z1','z2','z2','z2','z3','z3','z3','z4','z4','z4','m1','m1'];
+  engine.state.drawnTile = 'm1';
+  const result = calculateChipMoves({
+    state: engine.state,
+    agariResult: makeYakumanResult('大四喜', 26, 2),
+    winnerId: 'P0',
+    isTsumo: true,
+  });
+  // W役満 → 20枚 ALL
+  assert.strictEqual(result.moves.P1, -20);
+  assert.strictEqual(result.moves.P2, -20);
+  assert.strictEqual(result.moves.P0, 40);
+});
+
+test('チップ: 数え役満（13翻だが isYakuman=false）は 5 枚 ALL', () => {
+  const engine = new GameEngine();
+  engine.init();
+  const p0 = engine.state.players[0];
+  // 適当な手牌（鳴き役なし・字牌だけ）
+  p0.hand = ['z1','z1','z1','z2','z2','z2','z3','z3','z3','z4','z4','z4','m5','m5'];
+  engine.state.drawnTile = 'm5';
+  const result = calculateChipMoves({
+    state: engine.state,
+    agariResult: makeKazoeYakumanResult(13),
+    winnerId: 'P0',
+    isTsumo: true,
+  });
+  // 数え役満 → 5 枚 ALL
+  assert.strictEqual(result.moves.P1, -5);
+  assert.strictEqual(result.moves.P2, -5);
+  assert.strictEqual(result.moves.P0, 10);
+});
+
+test('チップ: 12翻以下では数え役満ボーナスなし', () => {
+  const engine = new GameEngine();
+  engine.init();
+  const p0 = engine.state.players[0];
+  p0.hand = ['z1','z1','z1','z2','z2','z2','z3','z3','z3','z4','z4','z4','m5','m5'];
+  engine.state.drawnTile = 'm5';
+  const result = calculateChipMoves({
+    state: engine.state,
+    agariResult: makeKazoeYakumanResult(12),
+    winnerId: 'P0',
+    isTsumo: true,
+  });
+  // ルール③のボーナスなし
+  assert.strictEqual(result.breakdown.rule3, 0);
+});
+
+// ============================================================
 // #10 槍槓
 // ============================================================
 
