@@ -53,6 +53,10 @@ class StatsStore {
 
   // ファイルをロード（無ければ新規）。dir が無ければ作る。
   // 失敗してもサーバー全体を落とさないよう例外は握りつぶす（戦績は副機能）。
+  //
+  // 既存ファイルが JSON として壊れていた場合は、破損ファイルを
+  // *.broken-{timestamp} に退避してから空データで起動を継続する。
+  // これにより「一度壊れると永久にストアが無効化される」状態を防ぐ。
   init() {
     try {
       const dir = path.dirname(this.filePath);
@@ -61,12 +65,25 @@ class StatsStore {
       this.enabled = true;
       if (fs.existsSync(this.filePath)) {
         const raw = fs.readFileSync(this.filePath, 'utf8');
-        const parsed = JSON.parse(raw);
-        this.data = {
-          players: parsed.players || {},
-          stats: parsed.stats || {},
-          games: Array.isArray(parsed.games) ? parsed.games : [],
-        };
+        try {
+          const parsed = JSON.parse(raw);
+          this.data = {
+            players: parsed.players || {},
+            stats: parsed.stats || {},
+            games: Array.isArray(parsed.games) ? parsed.games : [],
+          };
+        } catch (parseErr) {
+          // JSON 破損時: バックアップして空データで起動継続
+          const backupPath = `${this.filePath}.broken-${Date.now()}`;
+          try {
+            fs.renameSync(this.filePath, backupPath);
+            console.warn(`[stats] JSON 破損を検出 → ${backupPath} へバックアップして空データで起動継続: ${parseErr.message}`);
+          } catch (renameErr) {
+            console.warn(`[stats] 破損ファイルのバックアップに失敗: ${renameErr.message}`);
+          }
+          this.data = emptyData();
+          this.save();
+        }
       } else {
         this.data = emptyData();
         this.save();
@@ -79,12 +96,25 @@ class StatsStore {
     }
   }
 
-  // 原子的に書き込む（一旦 .tmp に書いてから rename）
+  // 原子的に書き込む（一旦 .tmp に書いてから rename）。
+  // クラッシュ・電源断耐性のため fsync で物理ディスクへの書き込み確定を待つ。
+  // tmp パスにプロセス ID とランダム ID を含めて、複数プロセス間の衝突を防ぐ。
   save() {
     if (!this.enabled) return;
     try {
-      const tmp = this.filePath + '.tmp';
-      fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2), 'utf8');
+      // tmp パスを衝突しにくくする（pid + 短いランダム）
+      const tmp = `${this.filePath}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
+      const json = JSON.stringify(this.data, null, 2);
+      // open → write → fsync → close で物理ディスクへの書き込みを保証
+      const fd = fs.openSync(tmp, 'w');
+      try {
+        fs.writeSync(fd, json, 0, 'utf8');
+        // fsync: ファイル本体をディスクに同期（OS のページキャッシュをフラッシュ）
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+      // rename は同一ファイルシステム上で原子的
       fs.renameSync(tmp, this.filePath);
     } catch (err) {
       console.warn(`[stats] 保存失敗: ${err.message}`);
