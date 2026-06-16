@@ -612,6 +612,19 @@
       }
       return;
     }
+    // ★ FEVER 制限 / リーチ後制限のクライアント側ガード
+    //   サーバが「ツモ切りしかできません」エラーを返すケースを未然に防ぐ。
+    //   従来は サーバエラー → view.discarding が true のまま固まる、という詰みがあった。
+    const opts = view.myTurnOptions;
+    const drawnTile = opts && opts.drawnTile;
+    const tsumogiriOnly = !!(opts && (opts.restrictedByFever));
+    const isMyReached = !!(view.myHand && view.myHand.isReached);
+    if ((tsumogiriOnly || isMyReached) && drawnTile && tile !== drawnTile) {
+      showToast(tsumogiriOnly
+        ? '⚠ FEVER 中はツモ切りしかできません（最右の牌をタップ）'
+        : '⚠ リーチ後はツモ切りしかできません', 'error');
+      return;
+    }
     view.discarding = true;
     view.canDiscard = false;
     rerender();
@@ -1001,6 +1014,20 @@
       view.canDiscard = Array.isArray(payload.options) && payload.options.includes('discard');
       view.discarding = false;
       view.reachMode = false;
+      rerender();
+    });
+
+    // ★ サーバからのエラー（lobby:error）受信時に view 状態を必ず復元する
+    //   従来は toast を出すだけで discarding=true / canDiscard=false が残り、
+    //   FEVER 中ツモ切り違反などのエラー後にユーザーが操作不能（=「固まった」）
+    //   になるバグがあった。my-turn の情報があれば canDiscard を復元する。
+    fm.on('lobby:error', () => {
+      view.discarding = false;
+      view.reachMode = false;
+      if (view.myTurnOptions) {
+        view.canDiscard = Array.isArray(view.myTurnOptions.options)
+          && view.myTurnOptions.options.includes('discard');
+      }
       rerender();
     });
 

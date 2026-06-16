@@ -961,7 +961,15 @@ function executeCpuAction(io, room, playerId) {
   }
 
   // (4) 通常打牌
-  const tile = engine.cpuChooseDiscard(player);
+  //   仕様: 他家 FEVER 中・未リーチの場合はツモ切り強制（仕様書「7. FEVER ルール」）
+  //   旧実装はこの制約を無視して cpuChooseDiscard の最良牌を捨てていたため、
+  //   ルール違反の打牌が成立していた（freeze の原因ではないが正確性問題）。
+  let tile;
+  if (engine.hasOtherFever(playerId) && !player.isReached) {
+    tile = engine.state.drawnTile; // ツモ切り強制
+  } else {
+    tile = engine.cpuChooseDiscard(player);
+  }
   const isTsumogiri = tile === engine.state.drawnTile;
   engine.discardTile(playerId, tile, isTsumogiri);
 
