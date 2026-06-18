@@ -132,6 +132,20 @@ function privateHandView(state, playerId) {
 function agariView(state, agariResult, winnerId, isTsumo, fromPlayer, pointResult, reachBonusGain, chipResult, feverActive) {
   const winner = state.players.find((p) => p.id === winnerId);
   const winningTile = isTsumo ? state.drawnTile : (state.lastDiscard ? state.lastDiscard.tile : null);
+  // 面子分解情報（クライアント側でアガリ牌の塊ごとに表示するため）
+  // 国士無双・七対子・白ジョーカー等の特殊形は pattern.type を見て判断する。
+  // 通常パターンの場合: pattern.sets は副露を先頭に持つ「全面子」（手牌由来の面子は副露の後ろ）。
+  // 副露数（melds.length）で「副露由来 / 手牌由来」を分離できる。
+  const p = agariResult.pattern || {};
+  const patternForView = {
+    type: p.type || 'standard',
+    pairs: Array.isArray(p.pairs) ? p.pairs.map((pair) => [...pair]) : [],
+    sets: Array.isArray(p.sets) ? p.sets.map((s) => [...s]) : [],
+    setTypes: Array.isArray(p.setTypes) ? [...p.setTypes] : [],
+    isAnkou: Array.isArray(p.isAnkou) ? [...p.isAnkou] : [],
+    // 副露数: pattern.sets の先頭から何個が副露由来か
+    meldsCount: winner.melds.length,
+  };
   return {
     winner: { id: winnerId, name: winner.name, wind: winner.wind },
     isTsumo,
@@ -142,6 +156,8 @@ function agariView(state, agariResult, winnerId, isTsumo, fromPlayer, pointResul
     melds: winner.melds.map((m) => ({ type: m.type, tiles: [...m.tiles], fromPlayer: m.fromPlayer || null })),
     kitaPullsCount: winner.kitaPulls.length,
     winningTile,
+    // クライアント側で「雀頭 / 面子 / アガリ牌」を区切って表示するための情報
+    pattern: patternForView,
     yakuList: agariResult.yakuResult.yakuList.map((y) => ({ name: y.name, han: y.han })),
     totalHan: agariResult.yakuResult.totalHan,
     isYakuman: !!agariResult.yakuResult.isYakuman,
