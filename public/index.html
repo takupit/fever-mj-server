@@ -1173,21 +1173,41 @@
     color: rgba(255,255,255,0.85);
     margin-bottom: 14px;
   }
-  /* ===== アガリ画面・手牌レイアウト（A+B+C 改修） ===== */
-  /* 全体は 左:副露 / 中央:手牌（面子区切り） / 右:アガリ牌 の 3 ブロック */
+  /* ===== アガリ画面・手牌レイアウト ===== */
+  /* 上に「ロン牌：◯◯」バナー、下に [副露 | 手牌（面子区切り）] の 1 行。
+     和了牌は手牌内の正しい位置に並び、その牌だけ赤枠で強調する。 */
   .agari-hand-area {
     display: flex;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    justify-content: center;
-    gap: 12px;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
     margin: 12px 0;
     padding: 12px 8px;
     background: rgba(255,255,255,0.04);
     border-radius: 8px;
     border: 1px solid rgba(255,215,0,0.2);
   }
-  /* ① 副露ブロック（左側） */
+  /* ロン/ツモ バナー（手牌の上） */
+  .agari-winning-banner {
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: #fff;
+    background: linear-gradient(90deg, rgba(255,45,85,0.7), rgba(255,140,0,0.6));
+    padding: 4px 12px;
+    border-radius: 4px;
+    border: 1px solid rgba(255,255,255,0.3);
+    box-shadow: 0 0 8px rgba(255,45,85,0.4);
+  }
+  /* 副露＋手牌の 1 行（中央寄せ・折り返し可） */
+  .agari-tiles-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+  }
+  /* ① 副露ブロック */
   .agari-melds-block {
     display: inline-flex;
     flex-wrap: wrap;
@@ -1199,11 +1219,11 @@
     display: inline-flex;
     gap: 1px;
   }
-  /* ② 手牌ブロック（中央）: 雀頭・面子ごとに span でまとめて隙間で区切る */
+  /* ② 手牌ブロック: 雀頭・面子ごとに span でまとめて隙間で区切る */
   .agari-hand-block {
     display: inline-flex;
     flex-wrap: wrap;
-    gap: 8px;  /* 面子間の隙間（一番ここがポイント） */
+    gap: 8px;  /* 面子間の隙間（ここがポイント） */
     align-items: center;
   }
   .agari-group {
@@ -1223,25 +1243,7 @@
     background: rgba(255,255,255,0.03);
     border-radius: 4px;
   }
-  /* ③ アガリ牌ブロック（右端で隔離） */
-  .agari-winning-block {
-    display: inline-flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    padding: 4px 6px 4px 12px;
-    border-left: 1px dashed rgba(255,255,255,0.18);
-  }
-  .agari-winning-label {
-    font-size: 11px;
-    font-weight: 800;
-    color: #ff2d55;
-    letter-spacing: 1px;
-    background: rgba(255, 45, 85, 0.15);
-    padding: 1px 6px;
-    border-radius: 3px;
-    border: 1px solid rgba(255, 45, 85, 0.5);
-  }
+  /* アガリ牌の強調（手牌内の正しい位置で赤枠＋グロー） */
   .agari-winning {
     animation: winning-glow 1s ease-in-out infinite alternate;
     border-color: #ff2d55 !important;

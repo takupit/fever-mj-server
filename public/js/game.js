@@ -1783,25 +1783,67 @@
   //   1 グループにまとめて返す（従来表示と同じ並び）。
   // hand に含まれるが pattern に登場しない牌は最後に 'rest' グループとして残す。
   // 赤ドラ ('p5r') は pattern.sets に 'p5' として現れるので、tileBase 一致＋赤優先で取り出す。
+  // アガリ画面の手牌を「雀頭 + 手牌内面子」のグループに分解する。
+  // 戻り値: [{ label, tiles: [{ tile, isWinning }, ...] }, ...]
+  //
+  // 重要: ロン時は payload.hand に和了牌が含まれない（13 枚）ので、
+  //   この関数の中で winningTile を allTiles に補完してから 14 枚で
+  //   グルーピングする。これによりノベタン雀頭（[m1,m1]の片方が和了牌）
+  //   などのケースで「雀頭が表示されない・1萬が孤立する」問題を回避できる。
+  //
+  //   tile の isWinning フラグで、どの位置の牌が和了牌かを正確に追える
+  //   （雀頭の片方なのか、順子の中なのかなど）。
+  //
+  // 七対子/国士無双/白ジョーカー等の特殊形は 1 グループにまとめて返す。
   function buildAgariHandGroups(payload) {
-    const hand = Array.isArray(payload.hand) ? [...payload.hand] : [];
+    const baseHand = Array.isArray(payload.hand) ? [...payload.hand] : [];
+    // ロン時は winningTile を 14 枚目として追加（ツモは hand に含まれる前提）
+    const allTiles = [...baseHand];
+    if (!payload.isTsumo && payload.winningTile) {
+      allTiles.push(payload.winningTile);
+    }
+    // 和了牌「1 枚だけ」をマーキングする位置を決める
+    //   - ロン: 追加した末尾の 1 枚
+    //   - ツモ: hand の末尾（GameEngine が drawnTile を末尾に持つ仕様）
+    const winIdx = allTiles.length - 1;
+    // tileMeta: { tile, isWinning, used: false } で取り出し済みを管理
+    const tileMeta = allTiles.map((t, i) => ({
+      tile: t,
+      isWinning: i === winIdx && t === payload.winningTile,
+      used: false,
+    }));
+
     const pattern = payload.pattern;
-    const fallback = [{ label: 'rest', tiles: hand }];
+    const wrapAsRest = () => {
+      // フォールバック: グルーピングしきれない場合は全部を rest として返す
+      return [{
+        label: 'rest',
+        tiles: tileMeta.filter((m) => !m.used).map((m) => ({ tile: m.tile, isWinning: m.isWinning })),
+      }];
+    };
 
-    if (!pattern || !pattern.type) return fallback;
-    if (pattern.type !== 'standard') return fallback; // 七対子/国士はそのまま
-    if (!Array.isArray(pattern.sets) || !Array.isArray(pattern.pairs)) return fallback;
+    if (!pattern || !pattern.type) return wrapAsRest();
+    if (pattern.type !== 'standard') return wrapAsRest(); // 七対子/国士はそのまま
+    if (!Array.isArray(pattern.sets) || !Array.isArray(pattern.pairs)) return wrapAsRest();
 
-    // hand から「base 一致＋赤優先」で 1 枚取り出すヘルパー
-    const remaining = [...hand];
+    // 「base 一致＋赤優先 + 和了牌は後回し」で 1 枚取り出すヘルパー。
+    //   和了牌を後回しにすることで「ペアの 1 枚目=手牌側、2 枚目=和了牌」となり
+    //   雀頭の左側が手牌・右側が和了牌として並ぶ。順子も同様（端の方が和了牌）。
     const takeOne = (base) => {
-      // 赤ドラを優先（'p5' を求めたら 'p5r' を先に取る）
-      let idx = remaining.findIndex((t) => t.replace('r', '') === base && t.endsWith('r'));
-      if (idx < 0) idx = remaining.findIndex((t) => t.replace('r', '') === base);
-      if (idx < 0) return null;
-      const t = remaining[idx];
-      remaining.splice(idx, 1);
-      return t;
+      const candidates = tileMeta
+        .map((m, idx) => ({ m, idx }))
+        .filter(({ m }) => !m.used && m.tile.replace('r', '') === base);
+      if (candidates.length === 0) return null;
+      // 優先順:
+      //   ① 赤 5 筒（赤優先）
+      //   ② 和了牌でないもの
+      //   ③ 残り
+      const pickedSpec = candidates.find(({ m }) => m.tile.endsWith('r') && !m.isWinning)
+        || candidates.find(({ m }) => !m.isWinning)
+        || candidates.find(({ m }) => m.tile.endsWith('r'))
+        || candidates[0];
+      pickedSpec.m.used = true;
+      return { tile: pickedSpec.m.tile, isWinning: pickedSpec.m.isWinning };
     };
 
     const groups = [];
@@ -1827,12 +1869,15 @@
       if (tiles.length > 0) groups.push({ label: type, tiles });
     }
 
-    // hand に残った牌（pattern に取り込めなかったもの・通常は和了牌など）
-    if (remaining.length > 0) {
-      groups.push({ label: 'rest', tiles: remaining });
+    // pattern に取り込めなかった残り（通常は発生しない、念のため）
+    const leftover = tileMeta
+      .filter((m) => !m.used)
+      .map((m) => ({ tile: m.tile, isWinning: m.isWinning }));
+    if (leftover.length > 0) {
+      groups.push({ label: 'rest', tiles: leftover });
     }
 
-    return groups.length > 0 ? groups : fallback;
+    return groups.length > 0 ? groups : wrapAsRest();
   }
 
   function showAgariOverlay(payload) {
@@ -1863,9 +1908,13 @@
 
     // ===== 手牌エリア =====
     //   ① 副露（左側・既にブロック単位で並ぶ）
-    //   ② 手牌（雀頭・面子ごとに小さな隙間で区切る）
-    //   ③ アガリ牌（右端で隔離、赤枠＋「ロン」/「ツモ」バッジ）
-    // ドラ・赤ドラ・裏ドラ・北抜きの牌は金色リングでハイライト
+    //   ② 手牌（雀頭・面子ごとに小さな隙間で区切り、和了牌の位置で赤枠強調）
+    //
+    // 注: 当初は ③ で「アガリ牌を右端で隔離」していたが、ノベタン雀頭
+    //   （[m1,m1] の片方が和了牌）で手牌側に m1 が 0 枚になり「1萬が孤立」
+    //   と見える問題があったため、和了牌は手牌内の正しい位置に戻し、
+    //   その牌のみ .agari-winning で赤枠強調する方針に変更した。
+    // ドラ・赤ドラ・裏ドラの牌は色リングでハイライト
     const doraSet = buildDoraSet(payload.doraIndicators);
     const uraDoraSet = buildDoraSet(payload.uraDoraIndicators);
     const decorateTile = (tileEl, tile) => {
@@ -1880,7 +1929,17 @@
     const handArea = document.createElement('div');
     handArea.className = 'agari-hand-area';
 
-    // ① 副露ブロック（既存ロジック踏襲、ただし decorate 適用）
+    // 「ロン」/「ツモ」ラベル（手牌の上にまとめて表示）
+    const winLabel = document.createElement('div');
+    winLabel.className = 'agari-winning-banner';
+    winLabel.textContent = payload.isTsumo ? `🔵 ツモ：${tileToLabel(payload.winningTile)}` : `🔴 ロン：${tileToLabel(payload.winningTile)}`;
+    handArea.appendChild(winLabel);
+
+    // 副露 + 手牌 を 1 行で並べる（行を分けるとアガリ牌が左右どちらか判別しにくいため）
+    const tilesRow = document.createElement('div');
+    tilesRow.className = 'agari-tiles-row';
+
+    // ① 副露ブロック
     if (payload.melds && payload.melds.length > 0) {
       const meldsBlock = document.createElement('div');
       meldsBlock.className = 'agari-melds-block';
@@ -1890,37 +1949,29 @@
         for (const t of m.tiles) meldSpan.appendChild(decorateTile(makeTileEl(t), t));
         meldsBlock.appendChild(meldSpan);
       }
-      handArea.appendChild(meldsBlock);
+      tilesRow.appendChild(meldsBlock);
     }
 
-    // ② 手牌ブロック（雀頭 + 手牌内面子で区切り）
+    // ② 手牌ブロック（雀頭 + 手牌内面子で区切り、和了牌の位置で赤強調）
     const handBlock = document.createElement('div');
     handBlock.className = 'agari-hand-block';
     const groups = buildAgariHandGroups(payload);
     for (const group of groups) {
       const groupSpan = document.createElement('span');
       groupSpan.className = `agari-group agari-group-${group.label}`;
-      for (const t of group.tiles) {
-        groupSpan.appendChild(decorateTile(makeTileEl(t), t));
+      for (const item of group.tiles) {
+        // 後方互換: 旧形式（文字列だけ）にも対応
+        const tile = typeof item === 'string' ? item : item.tile;
+        const isWinning = typeof item === 'string' ? false : !!item.isWinning;
+        const tileEl = decorateTile(makeTileEl(tile), tile);
+        if (isWinning) tileEl.classList.add('agari-winning');
+        groupSpan.appendChild(tileEl);
       }
       handBlock.appendChild(groupSpan);
     }
-    handArea.appendChild(handBlock);
+    tilesRow.appendChild(handBlock);
 
-    // ③ アガリ牌ブロック（右端で隔離・赤枠+ラベル）
-    if (payload.winningTile) {
-      const winBlock = document.createElement('div');
-      winBlock.className = 'agari-winning-block';
-      const winLabel = document.createElement('div');
-      winLabel.className = 'agari-winning-label';
-      winLabel.textContent = payload.isTsumo ? 'ツモ' : 'ロン';
-      winBlock.appendChild(winLabel);
-      const winTile = decorateTile(makeTileEl(payload.winningTile), payload.winningTile);
-      winTile.classList.add('agari-winning');
-      winBlock.appendChild(winTile);
-      handArea.appendChild(winBlock);
-    }
-
+    handArea.appendChild(tilesRow);
     card.appendChild(handArea);
 
     // 役一覧
