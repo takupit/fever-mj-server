@@ -25,10 +25,13 @@ const { isTenpai, getWaitingTiles } = require('../game/yaku');
 //   - 隣接牌（±1, ±2）が多い牌は残す（残す価値が高い）
 //   - 七筒・七萬は FEVER 用に残す方向
 //   - 北は河に出せないので候補から除外
+//   ★ 安全牌考慮（opts.opponents 渡し時）:
+//      他家にリーチ者がいる場合は「現物（その人の河にある牌）」を優先的に切り、
+//      逆に「他家リーチ後の捨て牌」周辺は避ける（簡易的な危険度評価）。
 // リーチ中はツモ切り（最後の牌を返す）。
 // 戻り値: tile コード（'m5' など）
 // ------------------------------------------------------------
-function chooseDiscard(player) {
+function chooseDiscard(player, opts = {}) {
   const hand = player.hand;
   if (player.isReached) {
     // リーチ中はツモ切り（北以外）
@@ -41,12 +44,27 @@ function chooseDiscard(player) {
     return lastTile;
   }
 
+  // 他家リーチ者の情報を整理（安全牌判定用）
+  // opts.opponents は [{ id, isReached, discards: [{tile, ...}] }, ...] を期待
+  const reachedOpponents = Array.isArray(opts.opponents)
+    ? opts.opponents.filter((o) => o.isReached && o.id !== player.id)
+    : [];
+  // 各リーチ者の現物（discards すべて）の基本牌集合
+  const genbutsuSet = new Set();
+  for (const o of reachedOpponents) {
+    if (!Array.isArray(o.discards)) continue;
+    for (const d of o.discards) {
+      genbutsuSet.add(tileBase(d.tile));
+    }
+  }
+
   // 北は河に捨てない（北抜きが優先される）
+  // countTiles はループ外で 1 回だけ（パフォーマンス改善・元実装は O(n²) だった）
+  const counts = countTiles(hand);
   const candidates = hand
     .filter((t) => t !== 'z4')
     .map((t) => {
       const base = tileBase(t);
-      const counts = countTiles(hand);
       let score = 0;
 
       // 字牌の孤立牌: 最優先で捨てる
@@ -65,6 +83,11 @@ function chooseDiscard(player) {
       if (counts[base] >= 2) score -= 50;
       // 七筒・七萬は FEVER 用に残す
       if (base === 'p7' || base === 'm7') score -= 30;
+
+      // ★ 安全牌ボーナス: リーチ者の現物は安全度大幅プラス
+      if (reachedOpponents.length > 0 && genbutsuSet.has(base)) {
+        score += 200;
+      }
 
       return { tile: t, score };
     });
@@ -111,10 +134,21 @@ function checkReach(player, wallLength) {
 }
 
 // ------------------------------------------------------------
-// (3) リーチ宣言の確率: 仕様書「14. CPU AI」より「可能時 70% で宣言」
+// (3) リーチ宣言の確率
+//   - 通常テンパイ:   70%（ストリーク補正で 1 ターン経過ごとに +10%、最大 95%）
+//   - フリテンテンパイ: 20%（ロンできないので戦術的に弱い）
+//   tenpaiStreak は player.tenpaiStreak に保存される（連続テンパイターン数）
 // ------------------------------------------------------------
-function shouldDeclareReach() {
-  return Math.random() < 0.7;
+function shouldDeclareReach(opts = {}) {
+  const isFuriten = !!opts.isFuriten;
+  const streak = typeof opts.tenpaiStreak === 'number' ? opts.tenpaiStreak : 0;
+  if (isFuriten) {
+    // フリテンは戦術的不利なのでリーチ確率を大きく下げる
+    return Math.random() < 0.2;
+  }
+  // 連続テンパイで「黙テンのまま動かない」のを防ぐため確率上昇
+  const base = 0.7 + Math.min(streak * 0.1, 0.25);
+  return Math.random() < base;
 }
 
 // ------------------------------------------------------------

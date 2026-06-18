@@ -39,7 +39,7 @@ class RoomManager {
   }
 
   // 部屋を新規作成。同じ合言葉の待機中部屋があればエラー。
-  createRoom({ password, name, socketId, persistentPlayerId }) {
+  createRoom({ password, name, socketId, persistentPlayerId, persistentPlayerVerified = false }) {
     if (!password) throw new Error('合言葉を入力してください。');
     if (!name) throw new Error('名前を入力してください。');
 
@@ -62,6 +62,8 @@ class RoomManager {
       connected: true,
       // フェーズ7: 戦績記録用の永続プレイヤーID（クライアントの localStorage 由来）
       persistentPlayerId: persistentPlayerId || null,
+      // ステージ C: 署名検証済みかどうか（戦績書き込み判断に使う）
+      persistentPlayerVerified: !!persistentPlayerVerified,
     };
 
     const room = {
@@ -82,7 +84,7 @@ class RoomManager {
 
   // ソロ練習部屋を作成（人間1人＋CPU2人）。即対局開始用。
   // 合言葉は不要、他人は参加できない。
-  createSoloRoom({ name, socketId, persistentPlayerId }) {
+  createSoloRoom({ name, socketId, persistentPlayerId, persistentPlayerVerified = false }) {
     if (!name) throw new Error('名前を入力してください。');
 
     const roomId = this.idGen();
@@ -96,6 +98,7 @@ class RoomManager {
       connected: true,
       isCpu: false,
       persistentPlayerId: persistentPlayerId || null,
+      persistentPlayerVerified: !!persistentPlayerVerified,
     };
     const cpu1 = {
       id: PLAYER_IDS[1],
@@ -132,7 +135,7 @@ class RoomManager {
 
   // 既存の部屋に参加。合言葉一致する待機部屋がなければエラー。
   // 3人揃ったら state を 'starting' に遷移。
-  joinRoom({ password, name, socketId, persistentPlayerId }) {
+  joinRoom({ password, name, socketId, persistentPlayerId, persistentPlayerVerified = false }) {
     if (!password) throw new Error('合言葉を入力してください。');
     if (!name) throw new Error('名前を入力してください。');
 
@@ -162,6 +165,7 @@ class RoomManager {
       token,
       connected: true,
       persistentPlayerId: persistentPlayerId || null,
+      persistentPlayerVerified: !!persistentPlayerVerified,
     };
     targetRoom.players.push(player);
 
@@ -275,20 +279,44 @@ class RoomManager {
     };
   }
 
-  // 期限切れ部屋を削除（state === 'waiting' のみ対象）
+  // 期限切れ部屋を削除
+  //   - 待機中（waiting）: 30 分経っても誰も入らなかった部屋
+  //   - 終了済み（ended）: 対局が終わって 30 分経った部屋（メモリ蓄積防止）
   // 戻り値: 削除した部屋IDの配列
   cleanupExpiredRooms() {
     const now = this.now();
     const expired = [];
     for (const [id, room] of this.rooms) {
+      // 待機部屋: createdAt から 30 分超
       if (room.state === 'waiting' && now - room.createdAt > ROOM_EXPIRE_MS) {
         expired.push(id);
+        continue;
+      }
+      // 終了部屋: endedAt から 30 分超（endedAt が無ければ createdAt 基準）
+      if (room.state === 'ended') {
+        const ts = room.endedAt || room.createdAt;
+        if (now - ts > ROOM_EXPIRE_MS) {
+          expired.push(id);
+        }
       }
     }
     for (const id of expired) {
       const room = this.rooms.get(id);
+      // 残っている CPU タイマー類があれば全て解除（C-1-2 と連携）
+      if (room.cpuTimers && Array.isArray(room.cpuTimers)) {
+        for (const t of room.cpuTimers) clearTimeout(t);
+        room.cpuTimers.length = 0;
+      }
+      if (room.cpuTakeoverTimers) {
+        for (const k of Object.keys(room.cpuTakeoverTimers)) clearTimeout(room.cpuTakeoverTimers[k]);
+        room.cpuTakeoverTimers = {};
+      }
+      if (room.pendingClaim && room.pendingClaim.timeoutId) {
+        clearTimeout(room.pendingClaim.timeoutId);
+      }
+      // 各種マップから参照を消す
       for (const p of room.players) {
-        this.tokenToPlayer.delete(p.token);
+        if (p.token) this.tokenToPlayer.delete(p.token);
         if (p.socketId) this.socketToRoom.delete(p.socketId);
       }
       this.rooms.delete(id);

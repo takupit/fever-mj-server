@@ -267,6 +267,27 @@ class GameEngine {
     return { trigger };
   }
 
+  // declareReach の巻き戻し（リーチ宣言後の打牌が失敗した場合に呼ぶ）
+  // declareReach の副作用（点数 -1000、reachSticks++、isReached、ipatsuActive、
+  // justDeclaredReach、reachType、feverActive、feverTrigger）をすべて元に戻す。
+  rollbackReach(playerId) {
+    const player = this.state.players.find((p) => p.id === playerId);
+    if (!player) return false;
+    if (!player.isReached) return false; // そもそもリーチしていない
+    player.isReached = false;
+    player.reachType = null;
+    player.justDeclaredReach = false;
+    player.ipatsuActive = false;
+    player.reachWaits = [];
+    // FEVER 状態も解除（リーチ宣言と同時に立った場合）
+    player.feverActive = false;
+    player.feverTrigger = null;
+    // 点棒を返却・場のリーチ棒も減算
+    player.score += 1000;
+    if (this.state.reachSticks > 0) this.state.reachSticks -= 1;
+    return true;
+  }
+
   // 一発消滅（指定プレイヤー以外のリーチ者の一発を消す）
   consumeIpatsu(triggerPlayerId) {
     this.state.players.forEach((p) => {
@@ -804,8 +825,18 @@ class GameEngine {
 
   // CPU 打牌 AI（フェーズ6 で src/cpu/ai.js に分離・ここはラッパー）
   // 既存テストや handlers.js が engine.cpuChooseDiscard を呼ぶ前提なので残置。
+  // ステージC で他家リーチ情報を渡せるよう opts を追加（安全牌判断用）。
   cpuChooseDiscard(player) {
-    return cpuAi.chooseDiscard(player);
+    // 他家の最新状態を要約して渡す（id / isReached / discards）
+    const opponents = this.state.players
+      .filter((p) => p.id !== player.id)
+      .map((p) => ({
+        id: p.id,
+        isReached: !!p.isReached,
+        // discards はそのまま渡す（{ tile, ... }[]）
+        discards: p.discards || [],
+      }));
+    return cpuAi.chooseDiscard(player, { opponents });
   }
 
   // 他のプレイヤーが FEVER 中か（boolean）

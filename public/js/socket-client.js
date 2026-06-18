@@ -8,6 +8,18 @@
   // ローカルストレージのキー
   const STORAGE_KEY = 'feverMj.player';
   const PID_KEY = 'feverMj.persistentPlayerId'; // フェーズ7: 戦績集計用の永続ID
+  const SIG_KEY = 'feverMj.playerSig';          // ステージC: 永続IDの署名（なりすまし対策）
+
+  // 永続ID の署名（HMAC）を保存・取得。
+  // サーバーが lobby:room-created / lobby:room-joined のレスポンスで発行する。
+  function loadPlayerSig() {
+    try { return localStorage.getItem(SIG_KEY) || null; } catch (e) { return null; }
+  }
+  function savePlayerSig(sig) {
+    try {
+      if (sig) localStorage.setItem(SIG_KEY, sig);
+    } catch (e) { /* ignore */ }
+  }
 
   // 永続プレイヤーID（このブラウザ固有のUUID）を取得 or 新規発行
   // 戦績記録のキーとして使う。クリアされなければずっと同じ。
@@ -41,6 +53,7 @@
     token: null,           // 再接続用トークン（部屋ごとに一回）
     playerName: null,
     persistentPlayerId: getOrCreatePersistentPlayerId(), // 戦績用の永続UUID
+    playerSig: loadPlayerSig(),                          // 永続UUID の HMAC 署名
   };
 
   // 接続状態の変化や、サーバーからのイベントを画面に伝えるためのハブ
@@ -147,6 +160,11 @@
           state.roomId = payload.roomId;
           state.playerId = payload.playerId;
           state.token = payload.token;
+          // サーバーが発行した新しい署名を localStorage に保存（初回 or 再発行）
+          if (payload.playerSig) {
+            state.playerSig = payload.playerSig;
+            savePlayerSig(payload.playerSig);
+          }
           saveSession();
         }
         emitLocal(evt, payload);
@@ -159,19 +177,25 @@
   function sendCreateRoom({ name, password }) {
     state.playerName = name;
     state.socket.emit('lobby:create-room', {
-      name, password, persistentPlayerId: state.persistentPlayerId,
+      name, password,
+      persistentPlayerId: state.persistentPlayerId,
+      playerSig: state.playerSig,
     });
   }
   function sendJoinRoom({ name, password }) {
     state.playerName = name;
     state.socket.emit('lobby:join-room', {
-      name, password, persistentPlayerId: state.persistentPlayerId,
+      name, password,
+      persistentPlayerId: state.persistentPlayerId,
+      playerSig: state.playerSig,
     });
   }
   function sendCreateSoloRoom({ name }) {
     state.playerName = name;
     state.socket.emit('lobby:create-solo-room', {
-      name, persistentPlayerId: state.persistentPlayerId,
+      name,
+      persistentPlayerId: state.persistentPlayerId,
+      playerSig: state.playerSig,
     });
   }
   function sendLeaveRoom() {

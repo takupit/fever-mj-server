@@ -25,6 +25,7 @@ const {
   calculateChunHatsuBonus,
 } = require('../game/chip');
 const cpuAi = require('../cpu/ai');
+const { signPlayerId, verifyPlayerSig } = require('./auth');
 
 // 鳴き応答の制限時間（仕様書「13. ポン・ロン応答」より 8 秒）
 const CLAIM_TIMEOUT_MS = 8000;
@@ -34,11 +35,26 @@ const CPU_THINK_MS_MAX = 1400;
 // 切断後の再接続猶予時間（仕様書「7. 切断検知」より 30 秒）
 const RECONNECT_GRACE_MS = 30000;
 
+// 合言葉の正規化（マッチング失敗を防ぐため強めに正規化する）
+//   1. Unicode 正規化 NFKC（全角英数 → 半角、全角空白 → 半角空白 など）
+//   2. すべての空白文字（半角・全角・タブ・改行）を除去
+//   3. 大小文字を小文字に統一（'Aiueo' と 'aiueo' を同じ部屋にする）
+//   4. 長さ制限（50 文字）
+// これにより「全角で入力した合言葉と半角で入力した合言葉」が同じ部屋になる。
+function normalizePassword(raw) {
+  if (raw == null) return '';
+  return String(raw)
+    .normalize('NFKC')
+    .replace(/\s+/g, '')   // \s は半角空白だけでなくタブ・改行・全角空白も含む
+    .toLowerCase()
+    .slice(0, 50);
+}
+
 // クライアントから受け取った値を安全に正規化（trim・長さ制限）
 function sanitize(payload) {
   const p = payload || {};
   const name = String(p.name == null ? '' : p.name).trim().slice(0, 20);
-  const password = String(p.password == null ? '' : p.password).trim().slice(0, 50);
+  const password = normalizePassword(p.password);
   if (!name) throw new Error('名前を入力してください。');
   if (!password) throw new Error('合言葉を入力してください。');
   return { name, password };
@@ -53,6 +69,28 @@ function sanitizePlayerId(id) {
   return trimmed;
 }
 
+// 永続プレイヤーID + 署名を検証して、戦績書き込み可能な ID か判断する。
+// 戻り値:
+//   { id, sig: 現行 sig（または再発行 sig）, verified: bool }
+//     verified=true なら戦績記録 OK、false（古いクライアント or 不正）なら
+//     戦績集計から除外する判断に使う。
+//   id が無効なら null。
+//
+// 戦略:
+//   - id が無効 → null（戦績無関係）
+//   - id 有効 + sig 一致 → verified=true
+//   - id 有効 + sig 不一致／未指定 → 「新規発行モード」とみなして verified=false
+//       新しい sig を返してクライアント側に保存させる（自動移行）。
+//       新規発行モードで来たプレイヤーは「初回」なので戦績はまだ存在しない想定。
+//       既存 ID を奪おうとした攻撃者は「他人の戦績更新」はできない（verified=false）。
+function verifyOrIssueSig(rawId, rawSig) {
+  const id = sanitizePlayerId(rawId);
+  if (!id) return null;
+  const verified = !!(rawSig && verifyPlayerSig(id, rawSig));
+  const sig = signPlayerId(id);
+  return { id, sig, verified };
+}
+
 // 部屋ID から Socket.IO のルーム名（チャネル名）を作る
 function roomChannel(roomId) {
   return `room:${roomId}`;
@@ -65,26 +103,34 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
   socket.on(C2S.LOBBY_CREATE_ROOM, (payload, ack) => {
     try {
       const { name, password } = sanitize(payload);
-      const persistentPlayerId = sanitizePlayerId(payload && payload.persistentPlayerId);
+      // 永続ID + 署名を検証/発行（古いクライアントは sig 無しで来るので発行モードへ）
+      const auth = verifyOrIssueSig(
+        payload && payload.persistentPlayerId,
+        payload && payload.playerSig
+      );
+      const persistentPlayerId = auth ? auth.id : null;
+      const persistentPlayerVerified = !!(auth && auth.verified);
       const { room, token, playerId } = roomManager.createRoom({
         password,
         name,
         socketId: socket.id,
         persistentPlayerId,
+        persistentPlayerVerified,
       });
 
       // この socket を「部屋専用チャネル」に参加させる
       socket.join(roomChannel(room.id));
 
-      // 作成した本人に詳細を返す（token は本人だけが知る）
+      // 作成した本人に詳細を返す（token は本人だけが知る・sig も返して保存させる）
       socket.emit(S2C.LOBBY_ROOM_CREATED, {
         roomId: room.id,
         playerId,
         token,
+        playerSig: auth ? auth.sig : null,
         room: roomManager.publicView(room),
       });
 
-      console.log(`[部屋作成] roomId=${room.id} host=${name} (${playerId})`);
+      console.log(`[部屋作成] roomId=${room.id} host=${name} (${playerId}) verified=${persistentPlayerVerified}`);
       if (typeof ack === 'function') ack({ ok: true });
     } catch (err) {
       socket.emit(S2C.LOBBY_ERROR, { message: err.message });
@@ -98,12 +144,18 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
   socket.on(C2S.LOBBY_JOIN_ROOM, (payload, ack) => {
     try {
       const { name, password } = sanitize(payload);
-      const persistentPlayerId = sanitizePlayerId(payload && payload.persistentPlayerId);
+      const auth = verifyOrIssueSig(
+        payload && payload.persistentPlayerId,
+        payload && payload.playerSig
+      );
+      const persistentPlayerId = auth ? auth.id : null;
+      const persistentPlayerVerified = !!(auth && auth.verified);
       const { room, player, token, playerId, isFull } = roomManager.joinRoom({
         password,
         name,
         socketId: socket.id,
         persistentPlayerId,
+        persistentPlayerVerified,
       });
 
       socket.join(roomChannel(room.id));
@@ -113,6 +165,7 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
         roomId: room.id,
         playerId,
         token,
+        playerSig: auth ? auth.sig : null,
         room: roomManager.publicView(room),
       });
 
@@ -146,17 +199,24 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
     try {
       const name = String((payload && payload.name) || '').trim().slice(0, 20);
       if (!name) throw new Error('名前を入力してください。');
-      const persistentPlayerId = sanitizePlayerId(payload && payload.persistentPlayerId);
+      const auth = verifyOrIssueSig(
+        payload && payload.persistentPlayerId,
+        payload && payload.playerSig
+      );
+      const persistentPlayerId = auth ? auth.id : null;
+      const persistentPlayerVerified = !!(auth && auth.verified);
 
       const { room, token, playerId } = roomManager.createSoloRoom({
         name,
         socketId: socket.id,
         persistentPlayerId,
+        persistentPlayerVerified,
       });
 
       socket.join(roomChannel(room.id));
       socket.emit(S2C.LOBBY_ROOM_CREATED, {
         roomId: room.id,
+        playerSig: auth ? auth.sig : null,
         playerId,
         token,
         room: roomManager.publicView(room),
@@ -424,6 +484,10 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
       }
 
       // リーチ宣言 + 打牌
+      // declareReach はその場で点数 -1000、reachSticks++、isReached=true 等の副作用を起こす。
+      // 直後の discardTile が失敗した場合、これらを巻き戻さないと
+      // 「点数だけ減ってリーチしていない」状態になりリトライ不能になるので
+      // rollbackReach で原状回復する。
       const reachResult = engine.declareReach(myPlayerId, 'normal', tile);
       // フェーズ7: FEVER 発動なら戦績集計用にカウント
       if (reachResult && reachResult.trigger && room.gameStats && room.gameStats[myPlayerId]) {
@@ -432,7 +496,14 @@ function registerHandlers(io, socket, roomManager, statsStore = null) {
       const isTsumogiri = tile === engine.state.drawnTile;
       const handIdx = typeof payload.handIdx === 'number' ? payload.handIdx : null;
       const ok = engine.discardTile(myPlayerId, tile, isTsumogiri, handIdx);
-      if (!ok) throw new Error('リーチ打牌に失敗しました。');
+      if (!ok) {
+        // リーチ状態を巻き戻してからエラーを投げる
+        engine.rollbackReach(myPlayerId);
+        if (room.gameStats && room.gameStats[myPlayerId] && reachResult && reachResult.trigger) {
+          room.gameStats[myPlayerId].feverCount -= 1; // FEVER カウントも巻き戻し
+        }
+        throw new Error('リーチ打牌に失敗しました。');
+      }
 
       io.to(roomChannel(room.id)).emit(S2C.GAME_ACTION_RESULT, {
         action: 'reach',
@@ -898,10 +969,34 @@ function progressToNextTurn(io, room) {
 // CPU 自動行動（ソロ練習モード用）
 // =====================================================================
 
+// CPU 用 setTimeout を room.cpuTimers に追跡保存するヘルパー。
+// 退室・hand-end・部屋削除時にまとめて clearTimeout できるようにする。
+// fn 内で room.state を見て早期 return しているので発火しても安全だが、
+// メモリリーク・古いタイマー暴発を防ぐためトラッキングを徹底する。
+function scheduleCpuTimer(room, fn, delay) {
+  if (!room.cpuTimers) room.cpuTimers = [];
+  const id = setTimeout(() => {
+    // 自身を配列から取り除く（GC されやすくする）
+    const idx = room.cpuTimers.indexOf(id);
+    if (idx >= 0) room.cpuTimers.splice(idx, 1);
+    fn();
+  }, delay);
+  room.cpuTimers.push(id);
+  return id;
+}
+
+// 部屋に紐づく CPU タイマーを全て解除する。
+// 局終了・退室・部屋削除時に呼ぶ。
+function clearAllCpuTimers(room) {
+  if (!room || !room.cpuTimers) return;
+  for (const id of room.cpuTimers) clearTimeout(id);
+  room.cpuTimers.length = 0;
+}
+
 // CPU のターンを思考時間後に実行
 function scheduleCpuTurn(io, room, playerId) {
   const delay = CPU_THINK_MS_MIN + Math.random() * (CPU_THINK_MS_MAX - CPU_THINK_MS_MIN);
-  setTimeout(() => executeCpuAction(io, room, playerId), delay);
+  scheduleCpuTimer(room, () => executeCpuAction(io, room, playerId), delay);
 }
 
 // CPU のターン中の意思決定（優先度: 北抜き → ツモ → リーチ → 打牌）
@@ -934,29 +1029,44 @@ function executeCpuAction(io, room, playerId) {
     }
   }
 
-  // (3) リーチ：テンパイで条件満たすなら 70% で宣言（cpuAi.shouldDeclareReach 経由）
-  if (!player.isReached && !engine.hasOtherFever(playerId) && cpuAi.shouldDeclareReach()) {
+  // (3) リーチ：テンパイで条件満たすなら確率で宣言
+  //   - 非フリテン: 70%（連続テンパイで +10%/ターン、最大 95%）
+  //   - フリテン  : 20%（戦術的不利なので確率を大きく下げる）
+  // ストリーク（連続テンパイ数）は player.tenpaiStreak で管理
+  if (!player.isReached && !engine.hasOtherFever(playerId)) {
     const reachOpt = engine.cpuCheckReach(player);
     if (reachOpt) {
-      const tile = reachOpt.discardTile;
-      const handIdx = reachOpt.discardIdx;
-      const reachType = reachOpt.isFuriten ? 'furiten' : 'normal';
-      const reachResult = engine.declareReach(playerId, reachType, tile);
-      // フェーズ7: CPU でも FEVER 発動を戦績にカウント
-      if (reachResult && reachResult.trigger && room.gameStats && room.gameStats[playerId]) {
-        room.gameStats[playerId].feverCount += 1;
-      }
-      const isTsumogiri = tile === engine.state.drawnTile;
-      engine.discardTile(playerId, tile, isTsumogiri, handIdx);
-
-      io.to(roomChannel(room.id)).emit(S2C.GAME_ACTION_RESULT, {
-        action: 'reach', playerId, tile, isTsumogiri,
+      // テンパイ継続中ならストリークを伸ばす
+      player.tenpaiStreak = (player.tenpaiStreak || 0) + 1;
+      const willReach = cpuAi.shouldDeclareReach({
+        isFuriten: !!reachOpt.isFuriten,
+        tenpaiStreak: player.tenpaiStreak,
       });
-      io.to(roomChannel(room.id)).emit(S2C.GAME_STATE_UPDATE, publicGameView(engine.state, room));
+      if (willReach) {
+        const tile = reachOpt.discardTile;
+        const handIdx = reachOpt.discardIdx;
+        const reachType = reachOpt.isFuriten ? 'furiten' : 'normal';
+        const reachResult = engine.declareReach(playerId, reachType, tile);
+        // フェーズ7: CPU でも FEVER 発動を戦績にカウント
+        if (reachResult && reachResult.trigger && room.gameStats && room.gameStats[playerId]) {
+          room.gameStats[playerId].feverCount += 1;
+        }
+        const isTsumogiri = tile === engine.state.drawnTile;
+        engine.discardTile(playerId, tile, isTsumogiri, handIdx);
+        player.tenpaiStreak = 0; // リーチしたのでリセット
 
-      const claimStarted = startClaimPhase(io, room);
-      if (!claimStarted) progressToNextTurn(io, room);
-      return;
+        io.to(roomChannel(room.id)).emit(S2C.GAME_ACTION_RESULT, {
+          action: 'reach', playerId, tile, isTsumogiri,
+        });
+        io.to(roomChannel(room.id)).emit(S2C.GAME_STATE_UPDATE, publicGameView(engine.state, room));
+
+        const claimStarted = startClaimPhase(io, room);
+        if (!claimStarted) progressToNextTurn(io, room);
+        return;
+      }
+    } else {
+      // テンパイでなければストリークをリセット
+      player.tenpaiStreak = 0;
     }
   }
 
@@ -1006,7 +1116,7 @@ function scheduleCpuClaims(io, room) {
     const p = engine.state.players.find((pp) => pp.id === pid);
     if (p && p.isCpu) {
       const delay = CPU_THINK_MS_MIN + Math.random() * 400;
-      setTimeout(() => decideCpuClaim(io, room, pid), delay);
+      scheduleCpuTimer(room, () => decideCpuClaim(io, room, pid), delay);
     }
   }
 }
@@ -1463,6 +1573,8 @@ function finalizeAgari(io, room, { agariResult, winnerId, isTsumo, fromPlayer })
   // 状態を hand-end にしてアクション受付を停止
   engine.state.phase = 'hand-end';
   room.state = 'hand-end';
+  // 局終了したので CPU タイマー（思考中・鳴き応答中）を全部解除
+  clearAllCpuTimers(room);
   room.lastResult = {
     type: 'agari',
     winnerId,
@@ -1706,6 +1818,8 @@ function finalizeRyukyoku(io, room) {
 
   engine.state.phase = 'hand-end';
   room.state = 'hand-end';
+  // 流局でも CPU タイマーを解除
+  clearAllCpuTimers(room);
   room.lastResult = {
     type: 'ryukyoku',
     dealerTenpai: tenpaiIds.includes(engine.state.dealerId),
@@ -1829,6 +1943,8 @@ function finalizeGameEnd(io, room, { reason, tobiPlayer }) {
     ranking,
   });
   room.state = 'ended';
+  // 終了時刻を記録（cleanupExpiredRooms が 30 分後の自動削除に使う）
+  room.endedAt = Date.now();
 
   // フェーズ7: 戦績を DB に書き込む
   // room.statsStore は startGameInRoom 直前に registerHandlers のクロージャから注入される
@@ -1838,8 +1954,11 @@ function finalizeGameEnd(io, room, { reason, tobiPlayer }) {
       const players = engine.state.players.map((p, i) => {
         const roomPlayer = room.players[i];
         const stats = (room.gameStats && room.gameStats[p.id]) || { yakumanCount: 0, feverCount: 0 };
+        // 署名検証済みのプレイヤーだけ persistentPlayerId を残す（なりすまし対策）。
+        // 未検証なら id=null で記録 → statsStore.recordGame で集計から除外される。
+        const verified = !!(roomPlayer && roomPlayer.persistentPlayerVerified);
         return {
-          id: roomPlayer ? roomPlayer.persistentPlayerId : null,
+          id: verified ? roomPlayer.persistentPlayerId : null,
           name: p.name,
           score: p.score,
           chips: p.chips,
@@ -1963,7 +2082,7 @@ function applyCpuTakeover(io, room, playerId, roomManager) {
   }
   // 鳴き応答中で対象なら CPU 判断
   if (room.pendingClaim && room.pendingClaim.eligible && room.pendingClaim.eligible.has(playerId)) {
-    setTimeout(() => decideCpuClaim(io, room, playerId), 200);
+    scheduleCpuTimer(room, () => decideCpuClaim(io, room, playerId), 200);
   }
 }
 

@@ -571,6 +571,25 @@
     fillTileRow($('#me-discards'), me.discards.map((d) => d.tile));
   }
 
+  // 手牌タイルのクリックハンドラ（イベント委譲）。
+  // bindEvents 内で #me-hand に 1 度だけ登録する。
+  // renderMyHand では addEventListener せず、CSS クラスと data-* 属性だけ付与する。
+  function onMeHandClick(e) {
+    const tileEl = e.target.closest('.tile');
+    if (!tileEl) return;
+    const handAttr = tileEl.dataset.handIdx;
+    if (handAttr == null) return;
+    const handIdx = parseInt(handAttr, 10);
+    const tile = tileEl.dataset.tile;
+    if (!tile || Number.isNaN(handIdx)) return;
+    // ステージ別に対応するハンドラへディスパッチ
+    if (view.reachMode && tileEl.classList.contains('reach-candidate')) {
+      onReachTileClick(tile, handIdx);
+    } else if (view.canDiscard && tileEl.classList.contains('clickable')) {
+      onTileClick(tile, handIdx);
+    }
+  }
+
   function renderMyHand(hand, drawnTile) {
     const handEl = $('#me-hand');
     handEl.innerHTML = '';
@@ -584,23 +603,22 @@
     const reachWaits = (view.myHand && view.myHand.reachWaits) ? view.myHand.reachWaits : [];
     const reachWaitsSet = new Set(reachWaits);
 
-    // 牌をクリック可能にする処理
-    const attachClick = (tileEl, tile, handIdx) => {
+    // タイル要素にメタ情報を付ける（クリックは委譲先 onMeHandClick で処理）
+    const decorateTile = (tileEl, tile, handIdx) => {
+      tileEl.dataset.tile = tile;
+      tileEl.dataset.handIdx = String(handIdx);
       // 待ち牌の強調（リーチ後）
       if (reachWaitsSet.has(tile.replace('r', ''))) {
         tileEl.classList.add('wait-tile');
       }
       if (view.reachMode) {
-        // リーチモード: リーチ候補にだけクリックを付ける
+        // リーチモード: リーチ候補だけ反応するように reach-candidate クラスを付ける
         const opt = reachIdxMap.get(handIdx);
         if (!opt) return;
         tileEl.classList.add('reach-candidate');
         if (opt.isFuriten) tileEl.classList.add('furiten');
-        tileEl.addEventListener('click', () => onReachTileClick(tile, handIdx));
       } else if (view.canDiscard) {
-        // 通常モード: 全部クリック可能
         tileEl.classList.add('clickable');
-        tileEl.addEventListener('click', () => onTileClick(tile, handIdx));
       }
     };
 
@@ -609,7 +627,7 @@
       const baseTiles = hand.slice(0, -1);
       baseTiles.forEach((t, i) => {
         const el = makeTileEl(t);
-        attachClick(el, t, i);
+        decorateTile(el, t, i);
         handEl.appendChild(el);
       });
       const gap = document.createElement('span');
@@ -617,12 +635,12 @@
       handEl.appendChild(gap);
       const drawnEl = makeTileEl(drawnTile);
       drawnEl.classList.add('drawn');
-      attachClick(drawnEl, drawnTile, hand.length - 1);
+      decorateTile(drawnEl, drawnTile, hand.length - 1);
       handEl.appendChild(drawnEl);
     } else {
       hand.forEach((t, i) => {
         const el = makeTileEl(t);
-        attachClick(el, t, i);
+        decorateTile(el, t, i);
         handEl.appendChild(el);
       });
     }
@@ -1008,6 +1026,14 @@
   // サーバーイベント購読
   // ------------------------------------------------------------
   function bindEvents() {
+    // 手牌タイルのクリックをイベント委譲で 1 度だけ登録
+    // （rerender ごとに addEventListener していた旧実装によるリスナー量産を解消）
+    const meHandEl = $('#me-hand');
+    if (meHandEl && !meHandEl.dataset.delegateBound) {
+      meHandEl.addEventListener('click', onMeHandClick);
+      meHandEl.dataset.delegateBound = '1';
+    }
+
     // 公開状態の更新（部屋全員に届く）
     fm.on('game:state-update', (publicState) => {
       // FEVER 発動検出: 前回 FEVER でなかった人が今回 FEVER になっていたら花火
@@ -1153,6 +1179,8 @@
     fm.on('game:hand-end', () => {
       hideAgariOverlay();
       hideRyukyokuOverlay();
+      // 局またぎで FEVER 履歴をクリア（次局の FEVER 発動で再度花火が出るように）
+      view.prevFeverActivePlayers.clear();
     });
 
     // フェーズ6: 切断・再接続・CPU 代打の通知
@@ -1415,6 +1443,15 @@
     if (feverLaunchInterval) clearInterval(feverLaunchInterval);
     if (feverAnimId) cancelAnimationFrame(feverAnimId);
 
+    // 画面回転やリサイズで Canvas のピクセル数を再計算する。
+    // 演出中（3 秒）だけ登録して、終了時に必ず解除する。
+    const onResize = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+
     feverLaunch(); feverLaunch(); feverLaunch();
     feverLaunchInterval = setInterval(feverLaunch, 250);
     feverAnim();
@@ -1426,6 +1463,9 @@
       feverAnimId = null;
       overlay.classList.remove('show');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // リスナー解除（メモリリーク防止）
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
     }, 3000);
   }
 
@@ -1506,8 +1546,12 @@
       chip.className = `chip-flying ${chipColor}`;
       const startX = fromRect.left + fromRect.width * (0.3 + Math.random() * 0.5);
       const startY = fromRect.top + fromRect.height / 2 + (Math.random() - 0.5) * 16;
-      const endX = toRect.left + toRect.width * (0.3 + Math.random() * 0.5);
-      const endY = toRect.top + toRect.height / 2 + (Math.random() - 0.5) * 16;
+      // 着弾点を相対的にランダム化（再計算時にも同じ位置に向かうよう保存）
+      const endRandX = 0.3 + Math.random() * 0.5;
+      const endRandY = (Math.random() - 0.5) * 16;
+      // 初期計算（フォールバック用）
+      let endX = toRect.left + toRect.width * endRandX;
+      let endY = toRect.top + toRect.height / 2 + endRandY;
       const midX = (startX + endX) / 2 + (Math.random() - 0.5) * 60;
       const midY = Math.min(startY, endY) - 120 - Math.random() * 60;
 
@@ -1531,6 +1575,12 @@
       }, launchDelay);
 
       setTimeout(() => {
+        // ★ 着弾直前に toEl の座標を再計算（オーバーレイ内スクロールで位置がズレている可能性あり）
+        const liveRect = toEl.getBoundingClientRect();
+        if (liveRect && liveRect.width > 0 && liveRect.height > 0) {
+          endX = liveRect.left + liveRect.width * endRandX;
+          endY = liveRect.top + liveRect.height / 2 + endRandY;
+        }
         chip.style.transition = `left ${arcDownTime}ms cubic-bezier(0.6, 0, 0.8, 0.4), top ${arcDownTime}ms cubic-bezier(0.4, 0.2, 0.8, 0.6), transform ${arcDownTime}ms ease-in`;
         chip.style.left = endX + 'px';
         chip.style.top = endY + 'px';
