@@ -47,6 +47,39 @@
     return tile;
   }
 
+  // ドラ表示牌から「実際のドラ」を返す（サーバ tile-utils.nextTile と同等のロジック）
+  //   萬子・筒子: 9 → 1 にループ
+  //   索子: FEVER MJ では s1, s9 しか存在しないので s1 ↔ s9 で交互
+  //   風牌 z1〜z4: 北 → 東 にループ
+  //   三元牌 z5〜z7: 中 → 白 にループ
+  function nextTile(indicator) {
+    if (!indicator) return null;
+    const base = indicator.replace('r', '');
+    const suit = base[0];
+    const num = parseInt(base[1], 10);
+    if (suit === 's') return num === 1 ? 's9' : 's1';
+    if (suit === 'm' || suit === 'p') {
+      const n = num === 9 ? 1 : num + 1;
+      return `${suit}${n}`;
+    }
+    if (suit === 'z') {
+      if (num >= 1 && num <= 4) return `z${num === 4 ? 1 : num + 1}`;
+      if (num >= 5 && num <= 7) return `z${num === 7 ? 5 : num + 1}`;
+    }
+    return base;
+  }
+
+  // ドラ表示牌の配列 → 実際のドラ牌（基本牌）の Set
+  function buildDoraSet(indicators) {
+    const set = new Set();
+    if (!Array.isArray(indicators)) return set;
+    for (const ind of indicators) {
+      const d = nextTile(ind);
+      if (d) set.add(d);
+    }
+    return set;
+  }
+
   // ------------------------------------------------------------
   // SVG 牌ファクトリ（フェーズ5a で旧 play.html から移植）
   //   makePinzu / makePinzuDot / makePinzu1SVG / getPinzuColors:
@@ -1744,6 +1777,64 @@
   // payload: { winner, isTsumo, fromPlayer, hand, melds, kitaPullsCount, winningTile,
   //            yakuList, totalHan, isYakuman, doraIndicators, uraDoraIndicators,
   //            basePoint, pointMoves, scoresAfter, reachBonusGain, round }
+  // アガリ画面の手牌を「雀頭 + 手牌内面子」のグループに分解する。
+  // 戻り値: [{ label: 'pair'|'shuntsu'|'koutsu'|'kantsu'|'rest', tiles: [...] }, ...]
+  //   pattern が無い・特殊形（七対子/国士/白ジョーカー）の場合は
+  //   1 グループにまとめて返す（従来表示と同じ並び）。
+  // hand に含まれるが pattern に登場しない牌は最後に 'rest' グループとして残す。
+  // 赤ドラ ('p5r') は pattern.sets に 'p5' として現れるので、tileBase 一致＋赤優先で取り出す。
+  function buildAgariHandGroups(payload) {
+    const hand = Array.isArray(payload.hand) ? [...payload.hand] : [];
+    const pattern = payload.pattern;
+    const fallback = [{ label: 'rest', tiles: hand }];
+
+    if (!pattern || !pattern.type) return fallback;
+    if (pattern.type !== 'standard') return fallback; // 七対子/国士はそのまま
+    if (!Array.isArray(pattern.sets) || !Array.isArray(pattern.pairs)) return fallback;
+
+    // hand から「base 一致＋赤優先」で 1 枚取り出すヘルパー
+    const remaining = [...hand];
+    const takeOne = (base) => {
+      // 赤ドラを優先（'p5' を求めたら 'p5r' を先に取る）
+      let idx = remaining.findIndex((t) => t.replace('r', '') === base && t.endsWith('r'));
+      if (idx < 0) idx = remaining.findIndex((t) => t.replace('r', '') === base);
+      if (idx < 0) return null;
+      const t = remaining[idx];
+      remaining.splice(idx, 1);
+      return t;
+    };
+
+    const groups = [];
+
+    // 雀頭
+    const pair = pattern.pairs[0];
+    if (pair && pair.length === 2) {
+      const t1 = takeOne(pair[0]);
+      const t2 = takeOne(pair[1]);
+      if (t1 && t2) groups.push({ label: 'pair', tiles: [t1, t2] });
+    }
+
+    // 手牌由来の面子だけ取り出す（先頭 meldsCount 個は副露なので飛ばす）
+    const meldsCount = pattern.meldsCount || 0;
+    for (let i = meldsCount; i < pattern.sets.length; i++) {
+      const set = pattern.sets[i];
+      const type = pattern.setTypes[i] || 'shuntsu';
+      const tiles = [];
+      for (const base of set) {
+        const t = takeOne(base);
+        if (t) tiles.push(t);
+      }
+      if (tiles.length > 0) groups.push({ label: type, tiles });
+    }
+
+    // hand に残った牌（pattern に取り込めなかったもの・通常は和了牌など）
+    if (remaining.length > 0) {
+      groups.push({ label: 'rest', tiles: remaining });
+    }
+
+    return groups.length > 0 ? groups : fallback;
+  }
+
   function showAgariOverlay(payload) {
     let el = document.getElementById('agari-overlay');
     if (!el) {
@@ -1770,33 +1861,66 @@
     winnerLine.innerHTML = `<strong>${escapeHtml(payload.winner.name)}</strong> ${fromText}`;
     card.appendChild(winnerLine);
 
-    // 手牌＋和了牌
+    // ===== 手牌エリア =====
+    //   ① 副露（左側・既にブロック単位で並ぶ）
+    //   ② 手牌（雀頭・面子ごとに小さな隙間で区切る）
+    //   ③ アガリ牌（右端で隔離、赤枠＋「ロン」/「ツモ」バッジ）
+    // ドラ・赤ドラ・裏ドラ・北抜きの牌は金色リングでハイライト
+    const doraSet = buildDoraSet(payload.doraIndicators);
+    const uraDoraSet = buildDoraSet(payload.uraDoraIndicators);
+    const decorateTile = (tileEl, tile) => {
+      const base = tile.replace('r', '');
+      // 北は北抜きドラ枠で別バッジ（手牌の z4 は普通の表示）
+      if (doraSet.has(base)) tileEl.classList.add('agari-dora');
+      if (uraDoraSet.has(base)) tileEl.classList.add('agari-ura-dora');
+      if (tile.endsWith('r')) tileEl.classList.add('agari-aka');
+      return tileEl;
+    };
+
     const handArea = document.createElement('div');
-    handArea.className = 'agari-hand';
-    // 副露
+    handArea.className = 'agari-hand-area';
+
+    // ① 副露ブロック（既存ロジック踏襲、ただし decorate 適用）
     if (payload.melds && payload.melds.length > 0) {
       const meldsBlock = document.createElement('div');
-      meldsBlock.className = 'agari-melds';
+      meldsBlock.className = 'agari-melds-block';
       for (const m of payload.melds) {
         const meldSpan = document.createElement('span');
         meldSpan.className = 'agari-meld';
-        for (const t of m.tiles) meldSpan.appendChild(makeTileEl(t));
-        handArea.appendChild(meldSpan);
+        for (const t of m.tiles) meldSpan.appendChild(decorateTile(makeTileEl(t), t));
+        meldsBlock.appendChild(meldSpan);
       }
+      handArea.appendChild(meldsBlock);
     }
-    // 手牌
-    for (const t of payload.hand) {
-      handArea.appendChild(makeTileEl(t));
+
+    // ② 手牌ブロック（雀頭 + 手牌内面子で区切り）
+    const handBlock = document.createElement('div');
+    handBlock.className = 'agari-hand-block';
+    const groups = buildAgariHandGroups(payload);
+    for (const group of groups) {
+      const groupSpan = document.createElement('span');
+      groupSpan.className = `agari-group agari-group-${group.label}`;
+      for (const t of group.tiles) {
+        groupSpan.appendChild(decorateTile(makeTileEl(t), t));
+      }
+      handBlock.appendChild(groupSpan);
     }
-    // 和了牌（強調）
+    handArea.appendChild(handBlock);
+
+    // ③ アガリ牌ブロック（右端で隔離・赤枠+ラベル）
     if (payload.winningTile) {
-      const sep = document.createElement('span');
-      sep.style.cssText = 'width:8px; display:inline-block;';
-      handArea.appendChild(sep);
-      const winTile = makeTileEl(payload.winningTile);
+      const winBlock = document.createElement('div');
+      winBlock.className = 'agari-winning-block';
+      const winLabel = document.createElement('div');
+      winLabel.className = 'agari-winning-label';
+      winLabel.textContent = payload.isTsumo ? 'ツモ' : 'ロン';
+      winBlock.appendChild(winLabel);
+      const winTile = decorateTile(makeTileEl(payload.winningTile), payload.winningTile);
       winTile.classList.add('agari-winning');
-      handArea.appendChild(winTile);
+      winBlock.appendChild(winTile);
+      handArea.appendChild(winBlock);
     }
+
     card.appendChild(handArea);
 
     // 役一覧
